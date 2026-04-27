@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智慧健康食堂点单系统</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #f5f7fa; color: #333; }
+        .top-nav { background-color: #fff; padding: 15px 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); display: flex; align-items: center; position: sticky; top: 0; z-index: 100; }
+        .home-btn { background-color: #4CAF50; color: white; border: none; padding: 8px 16px; border-radius: 20px; cursor: pointer; font-weight: bold; margin-right: 20px; }
+        .week-nav { display: flex; gap: 10px; overflow-x: auto; flex-grow: 1; }
+        .day-btn { padding: 8px 16px; border: none; background: #f0f2f5; border-radius: 20px; cursor: pointer; color: #666; transition: all 0.3s; }
+        .day-btn.active { background: #ff9800; color: white; font-weight: bold; }
+        .today-marker { border: 2px solid #f44336; }
+
+        /* 左右分栏布局 */
+        .main-layout { display: flex; max-width: 1200px; margin: 20px auto; gap: 20px; padding: 0 20px; }
+        .menu-area { flex: 7; }
+        .cart-area { flex: 3; display: flex; flex-direction: column; gap: 20px; position: sticky; top: 80px; height: calc(100vh - 100px); overflow-y: auto; }
+
+        /* 菜单卡片 */
+        .category-title { border-left: 4px solid #4CAF50; padding-left: 10px; margin: 20px 0 15px 0; }
+        .menu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; }
+        .menu-item { background: #fff; padding: 15px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); text-align: center; }
+        .menu-item img { width: 100px; height: 100px; border-radius: 50%; object-fit: cover; margin-bottom: 10px; }
+        .button-group { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+        .btn-add { background: #4CAF50; color: white; border: none; padding: 8px; border-radius: 6px; cursor: pointer; }
+        .btn-preview { background: #2196F3; color: white; border: none; padding: 8px; border-radius: 6px; cursor: pointer; }
+        .btn-disabled { background: #ccc; color: white; border: none; padding: 8px; border-radius: 6px; cursor: not-allowed; }
+
+        /* 餐盘通用样式 */
+        .cart-container { background: #fff; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); display: flex; flex-direction: column; }
+        .preview-cart { background: #e3f2fd; }
+        .cart-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px; }
+        .clear-btn { background: none; border: none; color: #f44336; cursor: pointer; font-size: 14px; }
+        .cart-item { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px dashed #eee; }
+        .cart-summary { margin-top: auto; border-top: 2px solid #eee; padding-top: 15px; text-align: center; }
+        .checkout-btn { width: 100%; background: #ff9800; color: white; border: none; padding: 12px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+
+        /* 悬浮导航与模态框 */
+        .fab-nav { position: fixed; right: 20px; bottom: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 90; }
+        .fab-btn { background: #fff; border: 1px solid #ddd; padding: 12px 15px; border-radius: 30px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); cursor: pointer; font-weight: bold; }
+
+        /* 毛玻璃居中弹窗 */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); backdrop-filter: blur(5px); display: none; justify-content: center; align-items: center; z-index: 99999; }
+        .modal-content { background: white; padding: 30px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); width: 90%; max-width: 400px; text-align: center; animation: popIn 0.3s ease-out; }
+        @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        .modal-input { width: 90%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; }
+        .modal-btn-group { display: flex; justify-content: space-around; margin-top: 20px; }
+        .modal-btn { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+
+        /* 隐藏其他界面 */
+        .section-hidden { display: none; }
+        .section-block { background: #fff; max-width: 600px; margin: 40px auto; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+    </style>
+</head>
+<body>
+
+    <div class="top-nav">
+        <button class="home-btn" onclick="goHome()">🏠 主页</button>
+        <div class="week-nav" id="weekNav"></div>
+    </div>
+
+    <div id="menuSection" class="main-layout">
+        <div class="menu-area" id="menuArea"></div>
+
+        <div class="cart-area">
+            <div class="cart-container">
+                <div class="cart-header">
+                    <h2>🛒 今日结算餐盘</h2>
+                    <button class="clear-btn" onclick="clearCart()">🗑️ 清空</button>
+                </div>
+                <div id="cartItems"></div>
+                <div class="cart-summary">
+                    <h3>总计: ¥<span id="totalPrice">0</span></h3>
+                    <h4 style="color: #4CAF50;">🔥 总热量: <span id="totalCalories">0</span> kcal</h4>
+                    <p style="font-size: 13px; color: #666; margin-top: 5px;">
+                        🍚 碳水: <span id="totalCarbs">0</span>g | 🥩 蛋白: <span id="totalProtein">0</span>g | 🥑 脂肪: <span id="totalFat">0</span>g
+                    </p>
+                    <button class="checkout-btn" onclick="checkout()">🛒 确认下单并结账</button>
+                </div>
+            </div>
+
+            <div class="cart-container preview-cart">
+                <div class="cart-header">
+                    <h2>📅 规划预览草稿</h2>
+                    <button class="clear-btn" onclick="clearPreviewCart()">🗑️ 清空</button>
+                </div>
+                <div id="previewCartItems"></div>
+                <div class="cart-summary">
+                    <h3>预计花费: ¥<span id="previewTotalPrice">0</span></h3>
+                    <h4 style="color: #4CAF50;">🔥 预计热量: <span id="previewTotalCalories">0</span> kcal</h4>
+                    <p style="font-size: 13px; color: #666; margin-top: 5px;">
+                        🍚 碳水: <span id="previewTotalCarbs">0</span>g | 🥩 蛋白: <span id="previewTotalProtein">0</span>g | 🥑 脂肪: <span id="previewTotalFat">0</span>g
+                    </p>
+                    <button class="checkout-btn" style="background: #2196F3;" onclick="convertPreviewToOrder()">📥 采纳此方案并点单</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="loginSection" class="section-hidden section-block">
+        <h2 style="text-align: center;">用户登录 / 注册</h2>
+        <input type="text" id="loginName" placeholder="真实姓名" class="modal-input" style="width: 100%; box-sizing: border-box;">
+        <input type="text" id="loginStudentId" placeholder="学号" class="modal-input" style="width: 100%; box-sizing: border-box;">
+        <input type="password" id="loginPassword" placeholder="密码 (新生初始密码 123456)" class="modal-input" style="width: 100%; box-sizing: border-box;">
+        <button class="checkout-btn" onclick="login()">登录系统</button>
+    </div>
+
+    <div id="profileSection" class="section-hidden section-block" style="text-align: center;">
+        <h2>👤 个人健康档案</h2>
+        <div id="profileAvatar" style="width: 80px; height: 80px; border-radius: 50%; margin: 0 auto 20px; overflow: hidden; background: #eee;"></div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; text-align: left;">
+            <div><label>性别:</label><input type="text" id="pfGender" class="modal-input"></div>
+            <div><label>年龄:</label><input type="number" id="pfAge" class="modal-input"></div>
+            <div><label>身高 (cm):</label><input type="number" id="pfHeight" class="modal-input"></div>
+            <div><label>体重 (kg):</label><input type="number" id="pfWeight" class="modal-input"></div>
+            <div style="grid-column: span 2;"><label>体脂率 (%):</label><input type="number" id="pfFatRate" class="modal-input" placeholder="选填，影响BMR精度"></div>
+        </div>
+        <div style="background: #e8f5e9; padding: 15px; border-radius: 8px; margin-top: 20px;">
+            <p>📊 BMI: <span id="calcBMI" style="font-weight: bold;">--</span></p>
+            <p>🔥 基础代谢 (BMR): <span id="calcBMR" style="font-weight: bold;">--</span> kcal/天</p>
+        </div>
+        <button class="checkout-btn" onclick="saveProfile()">保存健康档案</button>
+        <button class="checkout-btn" style="background: #f44336; margin-top: 10px;" onclick="triggerPasswordChange()">🔒 修改登录密码</button>
+    </div>
+
+    <div id="historySection" class="section-hidden section-block">
+        <h2>📜 历史订单记录</h2>
+        <div id="historyList"></div>
+    </div>
+
+    <div id="receiptSection" class="section-hidden section-block">
+        <h2 style="color: #4CAF50; text-align: center;">✅ 下单成功！</h2>
+        <div id="receiptContent" style="background: #f9f9f9; padding: 20px; border-radius: 8px;"></div>
+        <button class="checkout-btn" onclick="goHome()">返回首页继续点单</button>
+    </div>
+
+    <div class="fab-nav">
+        <button class="fab-btn" onclick="showProfile()">👤 个人主页</button>
+        <button class="fab-btn" onclick="showHistory()">📜 历史订单</button>
+        <button class="fab-btn" onclick="showAIPlanner()">💰 AI 预算配餐</button>
+        <button class="fab-btn" style="color: #f44336;" onclick="logout()">🚪 退出登录</button>
+    </div>
+
+    <div class="modal-overlay" id="customModalOverlay">
+        <div class="modal-content">
+            <h3 id="customModalTitle">提示</h3>
+            <p id="customModalMessage"></p>
+            <input type="text" id="customModalInput" class="modal-input" style="display: none;">
+            <div class="modal-btn-group">
+                <button class="modal-btn" id="customModalCancelBtn" style="background: #eee; color: #333; display: none;">取消</button>
+                <button class="modal-btn" id="customModalConfirmBtn" style="background: #4CAF50; color: white;">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="main.js"></script>
+</body>
+</html>
