@@ -1,5 +1,4 @@
 // 全局状态管理
-// 【核心修改点】👇 这里的地址已经替换为你专属的 Ngrok 公网链接，千万不要删掉前面的 https:// 和后面的引号
 const API_BASE_URL = 'https://unsocial-sphinx-catacomb.ngrok-free.dev';
 
 let cart = {};
@@ -43,7 +42,7 @@ function showSection(sectionId) {
     document.getElementById('receiptSection').style.display = 'none';
 
     if(sectionId === 'menuSection') {
-        document.getElementById(sectionId).style.display = 'flex'; // 恢复左右分栏
+        document.getElementById(sectionId).style.display = 'flex';
     } else {
         document.getElementById(sectionId).style.display = 'block';
     }
@@ -51,7 +50,6 @@ function showSection(sectionId) {
 
 function goHome() { showSection('menuSection'); }
 
-// 自定义居中模态框引擎
 function customAlert(title, message) {
     return new Promise(resolve => {
         const overlay = document.getElementById('customModalOverlay');
@@ -92,7 +90,10 @@ function switchDay(day) {
 
 function fetchMenu(day) {
     document.getElementById('menuArea').innerHTML = `<h3 style="text-align:center; color:#666;">⏳ 正在加载菜单...</h3>`;
-    fetch(`${API_BASE_URL}/api/menu?day=${day}`)
+    // 【关键修复】加上 Ngrok 免拦截通行证
+    fetch(`${API_BASE_URL}/api/menu?day=${day}`, {
+        headers: { 'ngrok-skip-browser-warning': 'true' }
+    })
         .then(res => res.json())
         .then(data => {
             currentMenuData = data;
@@ -108,7 +109,6 @@ function renderMenu(menuData) {
     const menuArea = document.getElementById('menuArea');
     menuArea.innerHTML = '';
 
-    // 按类别分组
     const categories = {};
     menuData.forEach(item => {
         if (!categories[item.category]) categories[item.category] = [];
@@ -142,7 +142,6 @@ function renderMenu(menuData) {
     }
 }
 
-// 结算购物车逻辑
 function addToCart(item) {
     if (cart[item.id]) { cart[item.id].quantity += 1; }
     else { cart[item.id] = { ...item, quantity: 1 }; }
@@ -196,7 +195,6 @@ function updateCart() {
     document.getElementById('totalFat').innerText = totalFat;
 }
 
-// 规划预览草稿逻辑
 function addToPreview(item) {
     if (Object.keys(previewCart).length === 0) previewDraftDay = currentDay;
     else if (previewDraftDay !== currentDay) {
@@ -281,13 +279,13 @@ async function login() {
 
     fetch(`${API_BASE_URL}/api/login`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
         body: JSON.stringify({ name, studentId, password })
     })
     .then(res => res.json())
     .then(async data => {
         if (data.status === 'success') {
-            currentUser = { name, studentId, ...data.user }; // 后端返回的是 user
+            currentUser = { name, studentId, ...data.user };
             await customAlert("✅ 登录成功", data.message);
 
             if (pendingAction === 'checkout') { pendingAction = null; checkout(); }
@@ -337,7 +335,7 @@ function generateReceipt() {
 
     let now = new Date();
     let timeString = now.toLocaleString();
-    let uniqueOrderId = 'ORD' + Date.now(); // 生成唯一订单号
+    let uniqueOrderId = 'ORD' + Date.now();
 
     receiptHtml += `<hr>
         <h3 style="text-align:right;">💰 总计支付: ¥${totalPrice}</h3>
@@ -351,7 +349,7 @@ function generateReceipt() {
 
     fetch(`${API_BASE_URL}/api/order`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
         body: JSON.stringify({ order_id: uniqueOrderId, student_id: currentUser.studentId, date: now.toLocaleDateString(), time: timeString, total_price: totalPrice, total_calories: totalCals, items: orderDetails })
     });
 
@@ -373,7 +371,7 @@ async function showProfile() {
     document.getElementById('pfAge').value = currentUser.age || '';
     document.getElementById('pfHeight').value = currentUser.height || '';
     document.getElementById('pfWeight').value = currentUser.weight || '';
-    document.getElementById('pfFatRate').value = currentUser.bodyFat || ''; // 后端返回的是 bodyFat
+    document.getElementById('pfFatRate').value = currentUser.bodyFat || '';
 
     calculateHealthData();
     showSection('profileSection');
@@ -414,7 +412,7 @@ function saveProfile() {
 
     fetch(`${API_BASE_URL}/api/update_profile`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
         body: JSON.stringify(profileData)
     })
     .then(res => res.json())
@@ -452,7 +450,7 @@ async function triggerPasswordChange() {
 
         fetch(`${API_BASE_URL}/api/change_password`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
             body: JSON.stringify({ studentId: currentUser.studentId, oldPassword: oldP, newPassword: newP })
         }).then(res=>res.json()).then(async data => {
             overlay.style.display = 'none';
@@ -468,7 +466,9 @@ async function triggerPasswordChange() {
 async function showHistory() {
     if (!currentUser) return customAlert("🔒 需要登录", "请先登录查看历史订单。");
 
-    fetch(`${API_BASE_URL}/api/history?student_id=${currentUser.studentId}`)
+    fetch(`${API_BASE_URL}/api/history?student_id=${currentUser.studentId}`, {
+        headers: { 'ngrok-skip-browser-warning': 'true' }
+    })
         .then(res => res.json())
         .then(data => {
             if (data.status === 'error' || !data.orders || data.orders.length === 0) {
@@ -522,7 +522,7 @@ async function showAIPlanner() {
         let cals = parseFloat(document.getElementById('aiCalories').value);
 
         if(!budget || !cals) {
-            overlay.style.zIndex = 999; // 降低层级防止与报错框冲突
+            overlay.style.zIndex = 999;
             return customAlert("⚠️ 提示", "请输入有效的预算和热量目标！").then(() => overlay.style.zIndex = 9999);
         }
 
@@ -535,7 +535,6 @@ async function showAIPlanner() {
 function generateAlgorithmRecommendation(totalBudget, totalCals) {
     if(currentMenuData.length === 0) return customAlert("提示", "请先返回首页加载菜单！");
 
-    // 简单贪心算法模拟：将目标分配为 早餐30%，午餐40%，晚餐30%
     const targets = [
         { name: "🍳 早餐", b: totalBudget * 0.3, c: totalCals * 0.3 },
         { name: "🍱 午餐", b: totalBudget * 0.4, c: totalCals * 0.4 },
