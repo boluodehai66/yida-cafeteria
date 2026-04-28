@@ -1,6 +1,5 @@
 // 全局状态管理
-const API_BASE_URL = 'https://unsocial-sphinx-catacomb.ngrok-free.dev';
-
+const API_BASE_URL = 'https://banish-monstrous-abroad.ngrok-free.dev';
 let cart = {};
 let previewCart = {};
 let currentMenuData = [];
