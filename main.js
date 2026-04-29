@@ -1,5 +1,7 @@
-// 全局状态管理
-const API_BASE_URL = 'https://banish-monstrous-abroad.ngrok-free.dev';
+// ================= 全局状态管理 =================
+// 既然在本地运行，这里直接指向本地的 Flask 服务器
+const API_BASE_URL = 'http://127.0.0.1:5000';
+
 let cart = {};
 let previewCart = {};
 let currentMenuData = [];
@@ -87,12 +89,12 @@ function switchDay(day) {
     fetchMenu(day);
 }
 
+// 【彻底恢复直连数据库】
 function fetchMenu(day) {
-    document.getElementById('menuArea').innerHTML = `<h3 style="text-align:center; color:#666;">⏳ 正在加载菜单...</h3>`;
-    // 【关键修复】加上 Ngrok 免拦截通行证
-    fetch(`${API_BASE_URL}/api/menu?day=${day}`, {
-        headers: { 'ngrok-skip-browser-warning': 'true' }
-    })
+    document.getElementById('menuArea').innerHTML = `<h3 style="text-align:center; color:#666; width:100%;">⏳ 正在从本地数据库加载菜单...</h3>`;
+
+    // 向本地的 Python 接口发起请求
+    fetch(`${API_BASE_URL}/api/menu?day=${day}`)
         .then(res => res.json())
         .then(data => {
             currentMenuData = data;
@@ -100,22 +102,55 @@ function fetchMenu(day) {
         })
         .catch(err => {
             console.error(err);
-            customAlert("❌ 错误", "无法连接到服务器，请检查后端和Ngrok是否运行。");
+            customAlert("❌ 错误", "无法连接到本地数据库，请确保 Python 后端已在 127.0.0.1:5000 启动！");
         });
 }
 
+// 核心功能：分栏渲染逻辑
 function renderMenu(menuData) {
     const menuArea = document.getElementById('menuArea');
     menuArea.innerHTML = '';
 
+    if (!menuData || menuData.length === 0) {
+        menuArea.innerHTML = `<h3 style="text-align:center; color:#666; width:100%; margin-top:50px;">今日暂无菜单数据</h3>`;
+        return;
+    }
+
+    // 1. 将数据按分类进行分组
     const categories = {};
     menuData.forEach(item => {
-        if (!categories[item.category]) categories[item.category] = [];
-        categories[item.category].push(item);
+        // 如果后端返回的类别名字和前端对不上，这里会自动处理
+        let cat = item.category || '其他';
+        if (!categories[cat]) categories[cat] = [];
+        categories[cat].push(item);
     });
 
-    for (let cat in categories) {
-        let catHtml = `<h2 class="category-title">${cat}</h2><div class="menu-grid">`;
+    // 2. 定义要求的分类显示顺序
+    const categoryOrder = ["主食", "荤菜", "素菜", "小吃", "汤羹"];
+
+    // 获取并排序分类键名
+    const sortedCatNames = Object.keys(categories).sort((a, b) => {
+        let indexA = categoryOrder.indexOf(a);
+        let indexB = categoryOrder.indexOf(b);
+        if (indexA === -1) indexA = 999;
+        if (indexB === -1) indexB = 999;
+        return indexA - indexB;
+    });
+
+    // 3. 初始化左侧导航和右侧内容区的 HTML 容器
+    let sidebarHtml = `<div class="category-sidebar">`;
+    let contentHtml = `<div class="menu-content" id="menuScrollContent">`;
+
+    let isFirst = true;
+
+    // 4. 按照排序后的顺序生成 HTML
+    sortedCatNames.forEach(cat => {
+        // 生成左侧的锚点按钮
+        sidebarHtml += `<button class="category-btn ${isFirst ? 'active' : ''}" onclick="scrollToCategory('${cat}')">${cat}</button>`;
+
+        // 生成右侧的菜品区块
+        contentHtml += `<div id="cat-${cat}"><h2 class="category-title">${cat}</h2><div class="menu-grid">`;
+
         categories[cat].forEach(item => {
             let buttonHTML = '';
             if (currentDay === realToday) {
@@ -125,20 +160,87 @@ function renderMenu(menuData) {
                 buttonHTML += `<button class="btn-preview" onclick='addToPreview(${JSON.stringify(item)})'>📅 加入规划测算</button>`;
             }
 
-            catHtml += `
+            // 继续使用好看的动态生成图片，或者你可以改为 ${item.image} 使用数据库里的图片
+            let generatedImageUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(item.name)}&background=random&color=fff&size=250&font-size=0.3&length=4`;
+
+            contentHtml += `
                 <div class="menu-item">
-                    <img src="${item.image}" alt="${item.name}">
-                    <h4 style="margin:5px 0;">${item.name}</h4>
+                    <img src="${generatedImageUrl}" alt="${item.name}" style="width:100%; height:150px; border-radius:8px; object-fit: cover; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                    <h4 style="margin:5px 0; font-size:14px;">${item.name}</h4>
                     <p style="color:#ff9800; font-weight:bold; margin:5px 0;">¥${item.price}</p>
                     <p style="font-size:12px; color:#4CAF50; margin:5px 0;">🔥 ${item.calories} kcal</p>
-                    <p style="font-size:11px; color:#888; margin-bottom:10px;">碳水 ${item.carbs || '--'}g | 蛋白 ${item.protein || '--'}g | 脂肪 ${item.fat || '--'}g</p>
+                    <p style="font-size:10px; color:#888; margin-bottom:10px;">碳水${item.carbs || '-'} | 蛋白${item.protein || '-'} | 脂肪${item.fat || '-'}</p>
                     <div class="button-group">${buttonHTML}</div>
                 </div>
             `;
         });
-        catHtml += `</div>`;
-        menuArea.innerHTML += catHtml;
+        contentHtml += `</div></div>`;
+        isFirst = false;
+    });
+
+    sidebarHtml += `</div>`;
+    contentHtml += `</div>`;
+
+    // 5. 将拼接好的两大块 HTML 塞入页面
+    menuArea.innerHTML = sidebarHtml + contentHtml;
+
+    // 6. 绑定滚动监听，实现左侧导航的联动高亮
+    setupScrollSpy();
+}
+
+// ============== 双向滚动联动逻辑 ==============
+function setupScrollSpy() {
+    const scrollContainer = document.getElementById('menuScrollContent');
+    if (!scrollContainer) return;
+
+    const sections = document.querySelectorAll('.menu-content > div[id^="cat-"]');
+    const navButtons = document.querySelectorAll('.category-btn');
+
+    scrollContainer.addEventListener('scroll', () => {
+        let currentCat = "";
+        const scrollTop = scrollContainer.scrollTop;
+
+        sections.forEach(section => {
+            const sectionTop = section.offsetTop - scrollContainer.offsetTop - 50;
+            if (scrollTop >= sectionTop) {
+                currentCat = section.id.replace('cat-', '');
+            }
+        });
+
+        if (Math.ceil(scrollTop + scrollContainer.clientHeight) >= scrollContainer.scrollHeight - 10) {
+            currentCat = sections[sections.length - 1].id.replace('cat-', '');
+        }
+
+        if (currentCat) {
+            navButtons.forEach(btn => {
+                if (btn.innerText === currentCat) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+        }
+    });
+}
+// ==========================================================
+
+function scrollToCategory(catName) {
+    const targetDiv = document.getElementById(`cat-${catName}`);
+    const scrollContainer = document.getElementById('menuScrollContent');
+
+    if (targetDiv && scrollContainer) {
+        scrollContainer.scrollTo({
+            top: targetDiv.offsetTop - scrollContainer.offsetTop,
+            behavior: 'smooth'
+        });
     }
+
+    document.querySelectorAll('.category-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.innerText === catName) {
+            btn.classList.add('active');
+        }
+    });
 }
 
 function addToCart(item) {
@@ -278,7 +380,7 @@ async function login() {
 
     fetch(`${API_BASE_URL}/api/login`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, studentId, password })
     })
     .then(res => res.json())
@@ -348,7 +450,7 @@ function generateReceipt() {
 
     fetch(`${API_BASE_URL}/api/order`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ order_id: uniqueOrderId, student_id: currentUser.studentId, date: now.toLocaleDateString(), time: timeString, total_price: totalPrice, total_calories: totalCals, items: orderDetails })
     });
 
@@ -411,7 +513,7 @@ function saveProfile() {
 
     fetch(`${API_BASE_URL}/api/update_profile`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(profileData)
     })
     .then(res => res.json())
@@ -449,7 +551,7 @@ async function triggerPasswordChange() {
 
         fetch(`${API_BASE_URL}/api/change_password`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ studentId: currentUser.studentId, oldPassword: oldP, newPassword: newP })
         }).then(res=>res.json()).then(async data => {
             overlay.style.display = 'none';
@@ -465,9 +567,7 @@ async function triggerPasswordChange() {
 async function showHistory() {
     if (!currentUser) return customAlert("🔒 需要登录", "请先登录查看历史订单。");
 
-    fetch(`${API_BASE_URL}/api/history?student_id=${currentUser.studentId}`, {
-        headers: { 'ngrok-skip-browser-warning': 'true' }
-    })
+    fetch(`${API_BASE_URL}/api/history?student_id=${currentUser.studentId}`)
         .then(res => res.json())
         .then(data => {
             if (data.status === 'error' || !data.orders || data.orders.length === 0) {
@@ -506,7 +606,7 @@ async function showAIPlanner() {
 
     document.getElementById('customModalTitle').innerText = "🤖 一日三餐智能规划";
     document.getElementById('customModalMessage').innerHTML = `
-        <p style="font-size:12px; color:#666;">算法将基于今天菜单，为您智能生成三餐最优搭配。</p>
+        <p style="font-size:12px; color:#666;">算法将调用后端的 AI 模型，为您生成三餐最优搭配。</p>
         <input type="number" id="aiBudget" placeholder="全天最高预算 (元)" class="modal-input" style="width:100%; box-sizing:border-box;">
         <input type="number" id="aiCalories" placeholder="全天目标热量 (kcal)" class="modal-input" style="width:100%; box-sizing:border-box;">
     `;
@@ -534,32 +634,44 @@ async function showAIPlanner() {
 function generateAlgorithmRecommendation(totalBudget, totalCals) {
     if(currentMenuData.length === 0) return customAlert("提示", "请先返回首页加载菜单！");
 
-    const targets = [
-        { name: "🍳 早餐", b: totalBudget * 0.3, c: totalCals * 0.3 },
-        { name: "🍱 午餐", b: totalBudget * 0.4, c: totalCals * 0.4 },
-        { name: "🍲 晚餐", b: totalBudget * 0.3, c: totalCals * 0.3 }
-    ];
+    customAlert("⏳ AI 思考中", "强大的 AI 测算模型正在为您匹配最优方案，请稍候...");
 
-    previewCart = {};
-    previewDraftDay = currentDay;
+    const requestData = {
+        budget: totalBudget,
+        calories: totalCals,
+        day: currentDay
+    };
 
-    targets.forEach(target => {
-        let bestItem = null;
-        let minDiff = Infinity;
+    fetch(`${API_BASE_URL}/api/ai_plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestData)
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === 'success') {
+            previewCart = {};
+            previewDraftDay = currentDay;
 
-        currentMenuData.forEach(item => {
-            if(item.price <= target.b) {
-                let diff = Math.abs(item.calories - target.c);
-                if(diff < minDiff) { minDiff = diff; bestItem = item; }
-            }
-        });
-        if(bestItem) {
-            if (previewCart[bestItem.id]) previewCart[bestItem.id].quantity += 1;
-            else previewCart[bestItem.id] = { ...bestItem, quantity: 1 };
+            const recommendedIds = data.recommended_ids;
+
+            recommendedIds.forEach(id => {
+                let bestItem = currentMenuData.find(item => item.id === id);
+                if (bestItem) {
+                    if (previewCart[bestItem.id]) previewCart[bestItem.id].quantity += 1;
+                    else previewCart[bestItem.id] = { ...bestItem, quantity: 1 };
+                }
+            });
+
+            updatePreviewCart();
+            goHome();
+            customAlert("✅ 规划完成", "AI 模型已成功为您生成最贴合目标的搭配！快看看【规划预览草稿】吧！");
+        } else {
+            customAlert("❌ 测算失败", data.message || "模型测算遇到一点问题，请重试。");
         }
+    })
+    .catch(err => {
+        console.error(err);
+        customAlert("❌ 网络错误", "无法连接到 AI 模型，请检查后端运行状态。");
     });
-
-    updatePreviewCart();
-    goHome();
-    customAlert("✅ 规划完成", "AI 已将最贴合目标的搭配发送至您的【规划预览草稿】！");
 }
