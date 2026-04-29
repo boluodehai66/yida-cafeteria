@@ -1,6 +1,6 @@
 // ================= 全局状态管理 =================
 // 既然在本地运行，这里直接指向本地的 Flask 服务器
-const API_BASE_URL = 'http://127.0.0.1:5000';
+const API_BASE_URL = 'https://banish-monstrous-abroad.ngrok-free.dev';
 
 let cart = {};
 let previewCart = {};
@@ -90,20 +90,24 @@ function switchDay(day) {
 }
 
 // 【彻底恢复直连数据库】
+// 修改 main.js 中的 fetchMenu 函数
 function fetchMenu(day) {
-    document.getElementById('menuArea').innerHTML = `<h3 style="text-align:center; color:#666; width:100%;">⏳ 正在从本地数据库加载菜单...</h3>`;
-
-    // 向本地的 Python 接口发起请求
-    fetch(`${API_BASE_URL}/api/menu?day=${day}`)
-        .then(res => res.json())
-        .then(data => {
-            currentMenuData = data;
-            renderMenu(data);
-        })
-        .catch(err => {
-            console.error(err);
-            customAlert("❌ 错误", "无法连接到本地数据库，请确保 Python 后端已在 127.0.0.1:5000 启动！");
-        });
+    document.getElementById('menuArea').innerHTML = `<h3>⏳ 加载中...</h3>`;
+    
+    fetch(`${API_BASE_URL}/api/menu?day=${day}`, {
+        headers: {
+            "ngrok-skip-browser-warning": "true" // 🌟 必须加上这一行来跳过 ngrok 的警告页
+        }
+    })
+    .then(res => res.json())
+    .then(data => {
+        currentMenuData = data;
+        renderMenu(data);
+    })
+    .catch(err => {
+        console.error("连接失败:", err);
+        document.getElementById('menuArea').innerHTML = `<h3>❌ 无法连接服务器，请检查后端和 ngrok 状态</h3>`;
+    });
 }
 
 // 核心功能：分栏渲染逻辑
