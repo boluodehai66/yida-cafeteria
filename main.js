@@ -665,7 +665,8 @@ function generateAlgorithmRecommendation(totalBudget, totalCals) {
 
             updatePreviewCart();
             goHome();
-            customAlert("✅ 规划完成", "AI 模型已成功为您生成最贴合目标的搭配！快看看【规划预览草稿】吧！");
+            const sourceText = data.source === 'local_lora' ? '本地 LoRA 模型' : '智能兜底算法';
+            customAlert("✅ 规划完成", `${data.reason || '已生成最贴合目标的搭配。'}\n\n来源：${sourceText}。快看看【规划预览草稿】吧！`);
         } else {
             customAlert("❌ 测算失败", data.message || "模型测算遇到一点问题，请重试。");
         }
