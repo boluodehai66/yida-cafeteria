@@ -1,0 +1,10 @@
+flask
+flask-sqlalchemy
+flask-cors
+openai
+torch>=2.0
+transformers
+peft
+accelerate
+pandas
+sentencepiece

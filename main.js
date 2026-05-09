@@ -1,6 +1,6 @@
 // ================= 全局状态管理 =================
 // 既然在本地运行，这里直接指向本地的 Flask 服务器
-const API_BASE_URL = 'http://127.0.0.1:5000';
+const API_BASE_URL = 'http://localhost:5000';
 
 let cart = {};
 let previewCart = {};
