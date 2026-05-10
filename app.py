@@ -41,11 +41,19 @@ class MenuItem(db.Model):
     image = db.Column(db.String(255))
 
 
+class Order(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    items = db.Column(db.Text)
+    total_price = db.Column(db.Float)
+
+
 # 🌟 全局强制建表
 with app.app_context():
     db.create_all()
 
 # ================= 2. 初始化 AI =================
+# 云端 API (用于菜品分类和 FLUX 画图)
 api_client = OpenAI(
     api_key="sk-cfxtslelijzmkfsdvnoqggdhmexmczpltavhbszqhmbivffr",
     base_url="https://api.siliconflow.cn/v1"
@@ -58,20 +66,16 @@ lora_path = r"D:\pycharm\pycharm project\yida_web\canteen_ai\model\canteen_lora"
 try:
     from transformers import BitsAndBytesConfig
 
-    # 🌟 开启 4-bit 量化引擎 (极速压缩技术)
+    # 🌟 开启 4-bit 量化引擎提速
     quantization_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_compute_dtype=torch.float16,
         bnb_4bit_use_double_quant=True,
         bnb_4bit_quant_type="nf4"
     )
-
     tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
-        base_model_path,
-        device_map="auto",
-        quantization_config=quantization_config,  # 👈 挂载量化引擎
-        torch_dtype=torch.float16,
+        base_model_path, device_map="auto", quantization_config=quantization_config, torch_dtype=torch.float16,
         trust_remote_code=True
     )
     try:
@@ -92,13 +96,11 @@ except Exception as e:
 
 
 # ================= 3. API 路由 =================
+
 @app.route('/api/login', methods=['POST'])
 def login():
     try:
         data = request.get_json(silent=True)
-        if not data:
-            return jsonify({'status': 'error', 'message': '未收到数据'}), 200
-
         student_id = data.get('studentId')
         password = data.get('password')
         name = data.get('name', '小钰同学')
@@ -107,7 +109,6 @@ def login():
             return jsonify({'status': 'error', 'message': '学号或密码不能为空！'}), 200
 
         user = User.query.filter_by(student_id=student_id).first()
-
         if not user:
             # 自动注册
             new_user = User(student_id=student_id, name=name, password=password)
@@ -122,6 +123,43 @@ def login():
 
         return jsonify({'status': 'error', 'message': '密码错误，请检查输入！'}), 200
     except Exception as e:
+        return jsonify({'status': 'error', 'message': f'后端报错: {str(e)}'}), 200
+
+
+# 🌟 新增：更新用户档案接口
+@app.route('/api/update_profile', methods=['POST'])
+def update_profile():
+    try:
+        data = request.json
+        student_id = data.get('studentId')
+
+        # 验证有没有学号
+        if not student_id:
+            return jsonify({'status': 'error', 'message': '未提供学号，无法更新'}), 200
+
+        # 去数据库里找这个学生
+        user = User.query.filter_by(student_id=student_id).first()
+        if not user:
+            return jsonify({'status': 'error', 'message': '在数据库中找不到该用户'}), 200
+
+        # 根据前端传来的数据，更新对应的字段（比如姓名、密码等）
+        if 'name' in data and data['name']:
+            user.name = data['name']
+        if 'password' in data and data['password']:
+            user.password = data['password']
+
+        # 保存到数据库
+        db.session.commit()
+        print(f"✅ 学号 {student_id} 的档案更新成功！")
+
+        return jsonify({
+            'status': 'success',
+            'message': '档案保存成功！',
+            'user': {'id': user.id, 'name': user.name, 'balance': user.balance}
+        })
+
+    except Exception as e:
+        print(f"🔥 更新档案报错:\n{traceback.format_exc()}")
         return jsonify({'status': 'error', 'message': f'后端报错: {str(e)}'}), 200
 
 
@@ -151,25 +189,53 @@ def get_menu():
                      'carbs': i.carbs, 'protein': i.protein, 'fat': i.fat, 'image': i.image} for i in items])
 
 
+# 🌟 新增：调用 FLUX.1-schnell 免费大模型画图并存入数据库
+@app.route('/api/generate_image', methods=['POST'])
+def generate_image():
+    try:
+        dish_name = request.json.get('name')
+        if not dish_name:
+            return jsonify({"status": "error", "message": "没有提供菜名"}), 400
+
+        print(f"🎨 正在召唤 FLUX 为【{dish_name}】作画...")
+        prompt = f"Professional food photography of a delicious Chinese dish named {dish_name}, steaming hot, highly detailed, appetizing, restaurant quality, cinematic lighting, 8k resolution, macro shot."
+
+        response = api_client.images.generate(
+            model="black-forest-labs/FLUX.1-schnell",
+            prompt=prompt,
+            size="1024x1024",
+            response_format="url"
+        )
+        image_url = response.data[0].url
+
+        item = MenuItem.query.filter_by(name=dish_name).first()
+        if item:
+            item.image = image_url
+            db.session.commit()
+            print(f"✅ 【{dish_name}】照片已入库！")
+
+        return jsonify({"status": "success", "image_url": image_url})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 200
+
+
+# 🌟 核心升级：复刻同学的 infer.py 逻辑 + 套餐分块提取算法
 @app.route('/api/ai_plan', methods=['POST'])
 def ai_plan():
     try:
         data = request.json
-        user_input = data.get('text', '')  # 🌟 直接接收用户的原始对话文本
+        user_input = data.get('text', '')
         day = data.get('day', '周一')
 
         menu_items = MenuItem.query.filter_by(day=day).all()
         if not menu_items:
             return jsonify({"status": "error", "message": "当天没有菜单数据"})
 
-        # ==================== 🌟 1:1 完美复刻 infer.py ====================
         menu_desc = "\n".join([f"- {i.name} ￥{i.price} {i.calories}kcal" for i in menu_items])
-
         system_prompt = f"你是食堂点餐助手。回答用户关于食堂的问题。\n\n当前可用菜单（{day}）：\n{menu_desc[:1500]}\n\n食堂信息：综合楼一楼，早餐7-9点，午餐11:30-13:30，晚餐17-19点"
-
         full_prompt = f"<|im_start|>system\n{system_prompt}<|im_end|>\n<|im_start|>user\n{user_input}<|im_end|>\n<|im_start|>assistant\n"
 
-        if 'model' not in globals() or model is None or tokenizer is None:
+        if model is None or tokenizer is None:
             return jsonify({"status": "error", "message": "AI 模型未加载，请检查后端报错。"})
 
         inputs = tokenizer([full_prompt], return_tensors="pt").to(model.device)
@@ -177,7 +243,7 @@ def ai_plan():
             outputs = model.generate(
                 **inputs,
                 max_new_tokens=512,
-                temperature=0.5,  # 恢复同学设定的 0.5 灵魂温度
+                temperature=0.5,
                 top_p=0.8,
                 do_sample=True,
                 pad_token_id=tokenizer.eos_token_id,
@@ -190,17 +256,44 @@ def ai_plan():
             assistant_response = response.strip()
 
         print(f"\n🤖 AI 自由发挥的回复:\n{assistant_response}\n")
-        # ===================================================================
 
-        # 🌟 魔法提取术：从 AI 的长篇大论中，精准揪出它推荐的菜品 ID
-        recommended_ids = []
-        for item in menu_items:
-            if item.name in assistant_response:
-                recommended_ids.append(item.id)
+        combos = []
+        current_combo_name = "🍽️ 推荐搭配"
+        current_ids = []
+        split_keywords = ["早餐", "午餐", "晚餐", "夜宵", "套餐一", "套餐二", "套餐三", "方案一", "方案二", "方案三",
+                          "第一餐", "第二餐", "第三餐", "推荐搭配"]
+
+        for line in assistant_response.split('\n'):
+            line = line.strip()
+            if not line: continue
+
+            is_header = False
+            for kw in split_keywords:
+                if kw in line and len(line) < 25:
+                    if current_ids:
+                        combos.append({"name": current_combo_name, "ids": current_ids})
+                        current_ids = []
+                    current_combo_name = line.strip("*#【】:-： ")
+                    is_header = True
+                    break
+
+            if not is_header:
+                # 🌟 修复：超级无敌模糊匹配！无视所有空格！
+                for item in menu_items:
+                    # 把数据库菜名和 AI 生成的文字，统统去掉两端甚至中间的空格再对比
+                    db_name_clean = item.name.strip()
+                    line_clean = line.replace(" ", "").replace("　", "")
+
+                    if (db_name_clean in line or db_name_clean.replace(" ",
+                                                                       "") in line_clean) and item.id not in current_ids:
+                        current_ids.append(item.id)
+
+        if current_ids:
+            combos.append({"name": current_combo_name, "ids": current_ids})
 
         return jsonify({
             "status": "success",
-            "recommended_ids": list(set(recommended_ids)),
+            "combos": combos,
             "reason": assistant_response
         })
 

@@ -30,16 +30,22 @@
         /* 右侧展示区 */
         .visual-section { flex: 4; background: #fafafa; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; }
         .visual-header { text-align: center; color: #666; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px dashed #ddd; }
-        .card { background: white; border-radius: 15px; padding: 15px; margin-bottom: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); display: flex; gap: 15px; transition: transform 0.3s; border: 1px solid transparent; }
-        .card:hover { transform: translateY(-5px); border-color: #4CAF50; }
-        .card img { width: 90px; height: 90px; border-radius: 10px; object-fit: cover; background: #eee; }
-        .card-info { flex: 1; position: relative; }
-        .card-info h4 { margin: 0 0 5px 0; color: #333; font-size: 17px; }
-        .tag { display: inline-block; padding: 2px 8px; background: #e8f5e9; color: #4CAF50; border-radius: 10px; font-size: 11px; margin-bottom: 5px; }
-        .price { color: #ff5722; font-weight: bold; font-size: 18px; position: absolute; right: 0; top: 0; }
-        .nutrients { font-size: 12px; color: #888; background: #f5f5f5; padding: 6px; border-radius: 6px; margin-top: 8px; line-height: 1.4; }
-        .action-btn { width: 100%; background: #ff9800; color: white; border: none; padding: 12px; border-radius: 10px; font-weight: bold; margin-top: 10px; cursor: pointer; font-size: 16px; display: none; box-shadow: 0 4px 10px rgba(255,152,0,0.3); }
 
+        /* 套餐分组展示样式 */
+        .combo-group { background: white; border: 1px solid #eee; border-radius: 12px; padding: 15px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
+        .combo-title { margin: 0 0 15px 0; color: #4CAF50; font-size: 16px; border-bottom: 1px dashed #ddd; padding-bottom: 8px; font-weight: bold; }
+        .combo-summary { text-align: right; color: #ff5722; font-weight: bold; font-size: 14px; margin-top: 10px; }
+
+        .card { background: white; border-radius: 10px; padding: 10px; margin-bottom: 10px; display: flex; gap: 15px; transition: transform 0.3s; border: 1px solid #f0f0f0; }
+        .card:hover { transform: translateY(-3px); border-color: #4CAF50; }
+        .card img { width: 90px; height: 90px; border-radius: 8px; object-fit: cover; background: #eee; transition: opacity 0.5s ease; }
+        .card-info { flex: 1; position: relative; }
+        .card-info h4 { margin: 0 0 5px 0; color: #333; font-size: 16px; }
+        .tag { display: inline-block; padding: 2px 8px; background: #e8f5e9; color: #4CAF50; border-radius: 10px; font-size: 11px; margin-bottom: 5px; }
+        .price { color: #ff5722; font-weight: bold; font-size: 16px; position: absolute; right: 0; top: 0; }
+        .nutrients { font-size: 12px; color: #888; background: #f5f5f5; padding: 6px; border-radius: 6px; margin-top: 8px; line-height: 1.4; }
+
+        .action-btn { width: 100%; background: #ff9800; color: white; border: none; padding: 12px; border-radius: 10px; font-weight: bold; margin-top: 10px; cursor: pointer; font-size: 16px; display: none; box-shadow: 0 4px 10px rgba(255,152,0,0.3); }
         .loading { font-style: italic; color: #888; display: flex; align-items: center; gap: 8px; }
     </style>
 </head>
@@ -48,17 +54,17 @@
     <div class="chat-section">
         <div class="chat-header">
             <button class="back-btn" onclick="window.location.href='index.html'">← 返回食堂</button>
-            <h2 style="margin:0; font-size: 18px;">🪄 智慧食堂 AI 营养师 (LoRA 驱动)</h2>
+            <h2 style="margin:0; font-size: 18px;">🪄 智慧食堂 AI 营养师 (多模态升级版)</h2>
         </div>
 
         <div class="chat-history" id="chatHistory">
             <div class="message ai">
-                <div class="bubble">你好小钰！我是你的专属 AI 营养师。我已经学习了食堂的所有菜品知识。<br><br>你可以直接告诉我你的需求，比如：<br>“<strong>我想要一个 20 元左右的高蛋白午餐方案</strong>”<br>或者“<strong>帮我搭配一下今天的一日三餐，总热量控制在 1500 大卡。</strong>”</div>
+                <div class="bubble">你好小钰！我是你的专属 AI 营养师。我已经同步了今日菜单，并开启了 FLUX 实时绘图引擎。<br><br>你可以直接告诉我你的需求，比如：<br>“<strong>帮我搭配一套 30 元左右的减脂三餐方案。</strong>”</div>
             </div>
         </div>
 
         <div class="input-area">
-            <input type="text" id="userInput" placeholder="告诉 AI 你的需求..." onkeypress="handleEnter(event)">
+            <input type="text" id="userInput" placeholder="告诉 AI 你的需求 (例如: 20元 高蛋白)..." onkeypress="handleEnter(event)">
             <button onclick="sendMessage()">发送</button>
         </div>
     </div>
@@ -66,7 +72,7 @@
     <div class="visual-section">
         <div class="visual-header">
             <h3 style="margin:0;">🍽️ 方案菜品预览</h3>
-            <p style="margin:5px 0 0 0; font-size: 12px;">AI 提到的菜品将在这里自动呈现卡片</p>
+            <p style="margin:5px 0 0 0; font-size: 12px;">AI 提到的菜品将按套餐自动呈现卡片</p>
         </div>
         <div id="recommendationPanel">
             <div style="text-align: center; color: #ccc; margin-top: 80px;">
@@ -74,11 +80,10 @@
                 <p>等待 AI 推荐菜品...</p>
             </div>
         </div>
-        <button id="addToCartBtn" class="action-btn" onclick="acceptPlan()">采纳此方案并一键点单</button>
+        <button id="addToCartBtn" class="action-btn" onclick="acceptPlan()">采纳此方案并前往点单</button>
     </div>
 
     <script>
-        // 🌟 统一使用 localhost，避免 127.0.0.1 导致的跨域拦截
         const API_BASE_URL = 'http://localhost:5000';
         let currentMenuData = [];
 
@@ -89,9 +94,9 @@
             try {
                 const res = await fetch(`${API_BASE_URL}/api/menu?day=${today}`);
                 currentMenuData = await res.json();
-                console.log("✅ 成功同步今日菜单库:", currentMenuData);
+                console.log("✅ 菜单库同步成功:", currentMenuData);
             } catch(e) {
-                console.error("❌ 菜单库同步失败，请检查后端:", e);
+                console.error("❌ 菜单库同步失败:", e);
             }
         }
 
@@ -101,7 +106,6 @@
             if (e.key === 'Enter') sendMessage();
         }
 
-        // 渲染消息气泡
         function appendBubble(role, htmlContent, id = '') {
             const history = document.getElementById('chatHistory');
             const msgDiv = document.createElement('div');
@@ -121,13 +125,12 @@
             inputEl.value = '';
 
             const loadingId = 'loading-' + Date.now();
-            appendBubble('ai', '<span class="loading">🤖 AI 营养师正在思考配餐逻辑...</span>', loadingId);
+            appendBubble('ai', '<span class="loading">🤖 AI 助手正在极速测算并构思方案...</span>', loadingId);
 
             const days = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
             const today = days[new Date().getDay()];
 
             try {
-                // 如果菜单没加载，临时补救
                 if (currentMenuData.length === 0) await fetchMenuData();
 
                 const res = await fetch(`${API_BASE_URL}/api/ai_plan`, {
@@ -140,74 +143,126 @@
                 document.getElementById(loadingId).remove();
 
                 if (data.status === 'success') {
-                    // 处理换行符，让 AI 的回复排版更漂亮
                     let formattedReason = data.reason.replace(/\n/g, '<br>');
                     appendBubble('ai', formattedReason);
-
-                    // 渲染右侧卡片
-                    renderCards(data.recommended_ids);
+                    renderComboCards(data.combos);
                 } else {
                     appendBubble('ai', `⚠️ 助手遇到了一点小麻烦：${data.message}`);
                 }
             } catch (err) {
                 if(document.getElementById(loadingId)) document.getElementById(loadingId).remove();
-                appendBubble('ai', `❌ 无法连接到 AI 大脑，请确认后端 app.py 是否正在运行。`);
+                appendBubble('ai', `❌ 无法连接到 AI 大脑，请确认后端服务器已启动。`);
             }
         }
 
-        function renderCards(ids) {
+        // 🌟 核心渲染：支持套餐分组与异步画图
+        function renderComboCards(combos) {
             const panel = document.getElementById('recommendationPanel');
             const actionBtn = document.getElementById('addToCartBtn');
             panel.innerHTML = '';
 
-            if (!ids || ids.length === 0) {
-                panel.innerHTML = '<p style="text-align:center; color:#999; margin-top:50px;">AI 本次回复中未提及具体菜品编号。</p>';
+            if (!combos || combos.length === 0) {
+                panel.innerHTML = '<p style="text-align:center; color:#999; margin-top:50px;">未提取到具体菜品，您可以换个说法让 AI 重新推荐。</p>';
                 actionBtn.style.display = 'none';
                 return;
             }
 
-            let totalPrice = 0;
-            let totalCal = 0;
-            let foundCount = 0;
+            let globalTotalPrice = 0;
+            let globalTotalCal = 0;
+            let hasValidDish = false;
 
-            ids.forEach(id => {
-                // 🌟 核心修复：强行转数字比对，解决 ID 格式不统一导致的“卡片不显示”
-                const item = currentMenuData.find(i => Number(i.id) === Number(id));
-                if (item) {
-                    foundCount++;
-                    totalPrice += item.price;
-                    totalCal += item.calories;
+            // 纯代码生成的 Base64 SVG 占位图，防屏蔽加载快
+            const loadingSvg = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="%23e8f5e9"/><text x="50" y="50" font-family="Arial" font-size="12" fill="%234caf50" text-anchor="middle" dominant-baseline="middle">作画中...</text></svg>`;
 
-                    panel.innerHTML += `
-                        <div class="card">
-                            <img src="${item.image || 'https://via.placeholder.com/100'}" alt="${item.name}">
-                            <div class="card-info">
-                                <span class="price">¥${item.price.toFixed(1)}</span>
-                                <h4>${item.name}</h4>
-                                <span class="tag">${item.category}</span>
-                                <div class="nutrients">🔥 热量: ${item.calories} kcal<br>🥩 蛋白: ${item.protein}g | 🍞 碳水: ${item.carbs}g</div>
+            combos.forEach(combo => {
+                let subTotal = 0;
+                let subCal = 0;
+                let cardsHtml = '';
+
+                combo.ids.forEach(id => {
+                    const item = currentMenuData.find(i => Number(i.id) === Number(id));
+                    if (item) {
+                        hasValidDish = true;
+                        subTotal += item.price;
+                        subCal += item.calories;
+                        globalTotalPrice += item.price;
+                        globalTotalCal += item.calories;
+
+                        let isRealImage = item.image && item.image.startsWith('http') && !item.image.includes('placeholder');
+                        let imgSrc = isRealImage ? item.image : loadingSvg;
+
+                        cardsHtml += `
+                            <div class="card" style="box-shadow: none; border: 1px solid #f0f0f0;">
+                                <img id="img-${item.id}" src="${imgSrc}" alt="${item.name}" title="${item.name}">
+                                <div class="card-info">
+                                    <span class="price">¥${item.price.toFixed(1)}</span>
+                                    <h4>${item.name}</h4>
+                                    <span class="tag">${item.category}</span>
+                                    <div class="nutrients">🔥 热量: ${item.calories} kcal<br>🥩 蛋白: ${item.protein}g | 🍞 碳水: ${item.carbs}g</div>
+                                </div>
                             </div>
+                        `;
+
+                        if (!isRealImage) {
+                            generateImageForDish(item.id, item.name);
+                        }
+                    }
+                });
+
+                if (cardsHtml !== '') {
+                    panel.innerHTML += `
+                        <div class="combo-group">
+                            <h4 class="combo-title">🏷️ ${combo.name}</h4>
+                            ${cardsHtml}
+                            <div class="combo-summary">此方案小计: ¥${subTotal.toFixed(1)} | ${subCal} kcal</div>
                         </div>
                     `;
                 }
             });
 
-            if (foundCount > 0) {
+            if (hasValidDish) {
                 panel.innerHTML = `
                     <div style="background:#e8f5e9; padding:12px; border-radius:12px; margin-bottom:20px; color:#2e7d32; font-weight:bold; text-align:center; border: 1px solid #c8e6c9;">
-                        📊 方案总计：¥${totalPrice.toFixed(1)} | ${totalCal} kcal
+                        📊 方案总计：¥${globalTotalPrice.toFixed(1)} | ${globalTotalCal} kcal
                     </div>
                 ` + panel.innerHTML;
                 actionBtn.style.display = 'block';
-            } else {
-                panel.innerHTML = '<p style="text-align:center; color:#999; margin-top:50px;">AI 提到的菜品 ID 在今日菜单库中未找到。</p>';
-                actionBtn.style.display = 'none';
+            }
+        }
+
+        async function generateImageForDish(id, name) {
+            try {
+                const res = await fetch(`${API_BASE_URL}/api/generate_image`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name })
+                });
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    const imgElement = document.getElementById(`img-${id}`);
+                    if (imgElement) {
+                        imgElement.style.opacity = 0;
+                        imgElement.src = data.image_url;
+                        imgElement.onload = () => imgElement.style.opacity = 1;
+                    }
+                    const menuItem = currentMenuData.find(i => Number(i.id) === Number(id));
+                    if(menuItem) menuItem.image = data.image_url;
+                } else {
+                    const errorSvg = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="%23ffebee"/><text x="50" y="50" font-family="Arial" font-size="12" fill="%23f44336" text-anchor="middle" dominant-baseline="middle">生成失败</text></svg>`;
+                    const imgElement = document.getElementById(`img-${id}`);
+                    if (imgElement) {
+                        imgElement.src = errorSvg;
+                        imgElement.title = `报错原因: ${data.message}`;
+                    }
+                }
+            } catch(e) {
+                console.error(`绘图错误:`, e);
             }
         }
 
         function acceptPlan() {
-            // 这里可以添加逻辑：将推荐的菜品自动加入购物车
-            alert("✅ 方案已采纳！由于这是 AI 推荐，请回到主页在菜单中手动勾选这几道菜完成下单。");
+            alert("✅ 方案已采纳！准备返回首页。");
             window.location.href = 'index.html';
         }
     </script>

@@ -1,11 +1,22 @@
 // ================= 全局状态管理 =================
-// 既然在本地运行，这里直接指向本地的 Flask 服务器
 const API_BASE_URL = 'http://localhost:5000';
 
 let cart = {};
 let previewCart = {};
 let currentMenuData = [];
-let currentUser = null;
+
+// 🌟 核心修复：直接从浏览器的“记忆”里找人！如果存了学号，就自动恢复登录状态
+let currentUser = localStorage.getItem('studentId') ? {
+    studentId: localStorage.getItem('studentId'),
+    name: localStorage.getItem('userName'),
+    balance: parseFloat(localStorage.getItem('userBalance')) || 100.0,
+    gender: localStorage.getItem('userGender'),
+    age: localStorage.getItem('userAge'),
+    height: localStorage.getItem('userHeight'),
+    weight: localStorage.getItem('userWeight'),
+    bodyFat: localStorage.getItem('userBodyFat')
+} : null;
+
 let pendingAction = null;
 const days = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 let realToday = "";
@@ -371,7 +382,7 @@ function convertPreviewToOrder() {
 }
 
 // ================= 3. 用户系统 =================
-async function login() {
+function login() {
     const name = document.getElementById('loginName').value;
     const studentId = document.getElementById('loginStudentId').value;
     const password = document.getElementById('loginPassword').value;
@@ -386,7 +397,23 @@ async function login() {
     .then(res => res.json())
     .then(async data => {
         if (data.status === 'success') {
-            currentUser = { name, studentId, ...data.user };
+            // 🌟 核心修复：登录不仅读取后端数据，还要把本地的健康数据也重新挂载上！
+            currentUser = {
+                name,
+                studentId,
+                ...data.user,
+                gender: localStorage.getItem('userGender'),
+                age: localStorage.getItem('userAge'),
+                height: localStorage.getItem('userHeight'),
+                weight: localStorage.getItem('userWeight'),
+                bodyFat: localStorage.getItem('userBodyFat')
+            };
+
+            // 把基础信息锁进本地记忆
+            localStorage.setItem('studentId', studentId);
+            localStorage.setItem('userName', name);
+            localStorage.setItem('userBalance', data.user.balance || 100.0);
+
             await customAlert("✅ 登录成功", data.message);
 
             if (pendingAction === 'checkout') { pendingAction = null; checkout(); }
@@ -401,19 +428,14 @@ async function login() {
 function logout() {
     currentUser = null;
     cart = {}; previewCart = {}; updateCart(); updatePreviewCart();
+
+    // 🌟 新增：退出登录时，把浏览器里的记忆全部抹除
+    localStorage.removeItem('studentId');
+    localStorage.removeItem('userName');
+    localStorage.removeItem('userBalance');
+
     customAlert("👋 提示", "已安全退出登录，餐盘已清空。");
     goHome();
-}
-
-async function checkout() {
-    if (Object.keys(cart).length === 0) return customAlert("提示", "你的餐盘是空的，先点点菜吧！");
-    if (!currentUser) {
-        pendingAction = 'checkout';
-        await customAlert("🔒 需要登录", "请先登录或注册账号再进行结算。");
-        showSection('loginSection');
-        return;
-    }
-    generateReceipt();
 }
 
 function generateReceipt() {
@@ -458,15 +480,37 @@ function generateReceipt() {
 }
 
 // ================= 4. 个人中心与历史 =================
-async function showProfile() {
-    if (!currentUser) {
-        pendingAction = 'profile';
-        await customAlert("🔒 需要登录", "请先登录查看个人主页。");
-        showSection('loginSection');
+function showProfile() {
+    // 🌟 双重校验：检查本地存储的学号
+    const savedStudentId = localStorage.getItem('studentId');
+    const savedUserName = localStorage.getItem('userName');
+
+    if (!savedStudentId) {
+        pendingAction = 'profile'; // 保留你原有的防丢逻辑
+        customAlert("🔒 需要登录", "登录状态已失效，请重新登录！").then(() => {
+            showSection('loginSection');
+        });
         return;
     }
 
-    document.getElementById('profileAvatar').innerHTML = `<div style="width:100%; height:100%; display:flex; justify-content:center; align-items:center; background:#4CAF50; color:white; font-size:24px; font-weight:bold;">${currentUser.name.slice(-2)}</div>`;
+    // 动态修复 currentUser 状态（如果你一刷新页面导致它变回 null 了）
+    if (!currentUser) {
+        currentUser = {
+            studentId: savedStudentId,
+            name: savedUserName,
+            balance: parseFloat(localStorage.getItem('userBalance')) || 100.0,
+            gender: localStorage.getItem('userGender'),
+            age: localStorage.getItem('userAge'),
+            height: localStorage.getItem('userHeight'),
+            weight: localStorage.getItem('userWeight'),
+            bodyFat: localStorage.getItem('userBodyFat')
+        };
+    }
+
+    // 🌟 保留你原有的完美 UI 渲染逻辑
+    if (currentUser.name) {
+        document.getElementById('profileAvatar').innerHTML = `<div style="width:100%; height:100%; display:flex; justify-content:center; align-items:center; background:#4CAF50; color:white; font-size:24px; font-weight:bold;">${currentUser.name.slice(-2)}</div>`;
+    }
 
     document.getElementById('pfGender').value = currentUser.gender || '';
     document.getElementById('pfAge').value = currentUser.age || '';
@@ -477,7 +521,6 @@ async function showProfile() {
     calculateHealthData();
     showSection('profileSection');
 }
-
 function calculateHealthData() {
     let height = parseFloat(document.getElementById('pfHeight').value);
     let weight = parseFloat(document.getElementById('pfWeight').value);
@@ -501,28 +544,34 @@ document.getElementById('pfHeight').addEventListener('input', calculateHealthDat
 document.getElementById('pfWeight').addEventListener('input', calculateHealthData);
 document.getElementById('pfFatRate').addEventListener('input', calculateHealthData);
 
-function saveProfile() {
-    const profileData = {
-        studentId: currentUser.studentId,
-        gender: document.getElementById('pfGender').value,
-        age: document.getElementById('pfAge').value,
-        height: document.getElementById('pfHeight').value,
-        weight: document.getElementById('pfWeight').value,
-        bodyFat: document.getElementById('pfFatRate').value
-    };
+async function saveProfile() {
+    // 提取你页面上填写的健康数据
+    const gender = document.getElementById('pfGender').value;
+    const age = document.getElementById('pfAge').value;
+    const height = document.getElementById('pfHeight').value;
+    const weight = document.getElementById('pfWeight').value;
+    const bodyFat = document.getElementById('pfFatRate').value;
 
-    fetch(`${API_BASE_URL}/api/update_profile`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(profileData)
-    })
-    .then(res => res.json())
-    .then(data => {
-        if(data.status === 'success') {
-            currentUser = { ...currentUser, ...profileData };
-            customAlert("✅ 成功", "健康档案保存成功！");
-        } else { customAlert("❌ 错误", data.message); }
-    });
+    // 🌟 存入本地记忆，这样不管怎么刷新页面，你的身体数据都在
+    localStorage.setItem('userGender', gender);
+    localStorage.setItem('userAge', age);
+    localStorage.setItem('userHeight', height);
+    localStorage.setItem('userWeight', weight);
+    localStorage.setItem('userBodyFat', bodyFat);
+
+    // 同步更新当前用户的变量
+    if (currentUser) {
+        currentUser.gender = gender;
+        currentUser.age = age;
+        currentUser.height = height;
+        currentUser.weight = weight;
+        currentUser.bodyFat = bodyFat;
+        calculateHealthData(); // 更新你的健康分析展示
+    }
+
+    // 完美调用你自己的自定义弹窗
+    await customAlert("✅ 保存成功", "您的个人健康档案已成功保存！");
+    goHome(); // 安全退回点餐主页面
 }
 
 async function triggerPasswordChange() {
@@ -675,4 +724,61 @@ function generateAlgorithmRecommendation(totalBudget, totalCals) {
         console.error(err);
         customAlert("❌ 网络错误", "无法连接到 AI 模型，请检查后端运行状态。");
     });
+}
+
+// 🌟 独家高级 UI 组件：毛玻璃质感弹窗
+function showCustomAlert(message, callback) {
+    const existing = document.getElementById('glass-alert-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'glass-alert-overlay';
+    overlay.style.cssText = `
+        position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+        background: rgba(0, 0, 0, 0.2); 
+        backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+        display: flex; justify-content: center; align-items: center;
+        z-index: 99999; opacity: 0; transition: opacity 0.3s ease;
+    `;
+
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+        background: rgba(255, 255, 255, 0.85); 
+        backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+        padding: 30px 40px; border-radius: 20px; 
+        box-shadow: 0 15px 35px rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.6);
+        text-align: center; max-width: 320px; transform: scale(0.8); 
+        transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    `;
+
+    modal.innerHTML = `
+        <div style="font-size: 45px; margin-bottom: 10px;">✨</div>
+        <h3 style="margin: 0 0 10px 0; color: #333; font-size: 18px;">系统提示</h3>
+        <p style="margin: 0 0 25px 0; color: #666; font-size: 15px; line-height: 1.5;">${message}</p>
+        <button id="glass-alert-btn" style="
+            background: #4CAF50; color: white; border: none; padding: 10px 35px;
+            border-radius: 30px; font-size: 16px; cursor: pointer; font-weight: bold;
+            box-shadow: 0 4px 15px rgba(76,175,80,0.3); transition: transform 0.2s;
+        ">确 认</button>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    setTimeout(() => {
+        overlay.style.opacity = '1';
+        modal.style.transform = 'scale(1)';
+    }, 10);
+
+    const btn = document.getElementById('glass-alert-btn');
+    btn.onmouseover = () => btn.style.transform = 'translateY(-2px)';
+    btn.onmouseout = () => btn.style.transform = 'translateY(0)';
+    btn.onclick = () => {
+        overlay.style.opacity = '0';
+        modal.style.transform = 'scale(0.8)';
+        setTimeout(() => {
+            overlay.remove();
+            if (callback) callback();
+        }, 300);
+    };
 }
