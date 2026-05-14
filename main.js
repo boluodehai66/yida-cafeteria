@@ -22,6 +22,9 @@ const days = ["周一", "周二", "周三", "周四", "周五", "周六", "周�
 let realToday = "";
 let currentDay = "";
 let previewDraftDay = "";
+let currentCampus = "北区";
+let currentFloor = "一楼";
+
 
 window.onload = () => {
     let dayIndex = new Date().getDay();
@@ -46,21 +49,38 @@ function renderNav() {
     });
 }
 
+// ==========================================================
+// 🌟 核心修改：带导航高亮的区域切换函数
+// ==========================================================
 function showSection(sectionId) {
+    // 1. 隐藏所有区域
     document.getElementById('menuSection').style.display = 'none';
     document.getElementById('loginSection').style.display = 'none';
     document.getElementById('profileSection').style.display = 'none';
     document.getElementById('historySection').style.display = 'none';
     document.getElementById('receiptSection').style.display = 'none';
 
+    // 2. 🌟 清除所有导航按钮的高亮状态
+    document.querySelectorAll('.fab-btn.nav-item').forEach(btn => btn.classList.remove('active'));
+
+    // 3. 显示目标区域并激活对应按钮
     if(sectionId === 'menuSection') {
         document.getElementById(sectionId).style.display = 'flex';
+        document.getElementById('nav-home').classList.add('active'); // 激活首页高亮
     } else {
         document.getElementById(sectionId).style.display = 'block';
+
+        // 根据进入的区域，点亮对应的按钮
+        if(sectionId === 'profileSection') document.getElementById('nav-profile').classList.add('active');
+        if(sectionId === 'historySection') document.getElementById('nav-history').classList.add('active');
     }
 }
 
-function goHome() { showSection('menuSection'); }
+function goHome() {
+    showLoadingTransition("🏠", "返回大厅", "正在为您准备新鲜菜单...", 800, () => {
+        showSection('menuSection');
+    });
+}
 
 function customAlert(title, message) {
     return new Promise(resolve => {
@@ -101,11 +121,12 @@ function switchDay(day) {
 }
 
 // 【彻底恢复直连数据库】
+// ================= 2. 菜单数据获取与渲染 =================
 function fetchMenu(day) {
-    document.getElementById('menuArea').innerHTML = `<h3 style="text-align:center; color:#666; width:100%;">⏳ 正在从本地数据库加载菜单...</h3>`;
+    document.getElementById('menuArea').innerHTML = `<h3 style="text-align:center; color:#666; width:100%;">⏳ 正在从本地数据库加载多校区菜单...</h3>`;
 
-    // 向本地的 Python 接口发起请求
-    fetch(`${API_BASE_URL}/api/menu?day=${day}`)
+    // 🌟 核心修改：向本地 Python 接口请求时，带上校区和楼层参数！
+    fetch(`${API_BASE_URL}/api/menu?day=${day}&campus=${currentCampus}&floor=${currentFloor}`)
         .then(res => res.json())
         .then(data => {
             currentMenuData = data;
@@ -113,8 +134,30 @@ function fetchMenu(day) {
         })
         .catch(err => {
             console.error(err);
-            customAlert("❌ 错误", "无法连接到本地数据库，请确保 Python 后端已在 127.0.0.1:5000 启动！");
+            customAlert("❌ 错误", "无法连接到本地数据库，请确保 Python 后端已启动！");
         });
+}
+
+// 🌟 新增：切换校区的函数
+function switchCampus(campus, btn) {
+    currentCampus = campus;
+    // 改变按钮的激活样式
+    document.querySelectorAll('.campus-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    // 立即重新拉取当前日期的该校区菜单
+    fetchMenu(currentDay);
+}
+
+// 🌟 新增：切换楼层的函数
+function switchFloor(floor, btn) {
+    currentFloor = floor;
+    // 改变按钮的激活样式
+    document.querySelectorAll('.floor-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    // 立即重新拉取当前日期的该楼层菜单
+    fetchMenu(currentDay);
 }
 
 // 核心功能：分栏渲染逻辑
@@ -172,11 +215,14 @@ function renderMenu(menuData) {
             }
 
             // 继续使用好看的动态生成图片，或者你可以改为 ${item.image} 使用数据库里的图片
-            let generatedImageUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(item.name)}&background=random&color=fff&size=250&font-size=0.3&length=4`;
+            // 🌟 Pro级修复：强制URL中文编码 + 跨域端口直连 + 智能图片兜底机制
+            let safeName = encodeURIComponent(item.name);
+            let finalImageUrl = `${API_BASE_URL}/static/images/${safeName}.jpg`;
+            let fallbackUrl = `https://ui-avatars.com/api/?name=${safeName}&background=random&color=fff&size=250&font-size=0.3&length=4`;
 
             contentHtml += `
                 <div class="menu-item">
-                    <img src="${generatedImageUrl}" alt="${item.name}" style="width:100%; height:150px; border-radius:8px; object-fit: cover; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                    <img src="${finalImageUrl}" onerror="this.onerror=null; this.src='${fallbackUrl}';" alt="${item.name}" style="width:100%; height:150px; border-radius:8px; object-fit: cover; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
                     <h4 style="margin:5px 0; font-size:14px;">${item.name}</h4>
                     <p style="color:#ff9800; font-weight:bold; margin:5px 0;">¥${item.price}</p>
                     <p style="font-size:12px; color:#4CAF50; margin:5px 0;">🔥 ${item.calories} kcal</p>
@@ -438,46 +484,6 @@ function logout() {
     goHome();
 }
 
-function generateReceipt() {
-    let receiptHtml = `<p><strong>🧑‍🎓 顾客信息：</strong>${currentUser.name} (${currentUser.studentId})</p><hr>`;
-    let totalPrice = 0; let totalCals = 0; let totalCarbs = 0; let totalProtein = 0; let totalFat = 0;
-
-    let orderDetails = [];
-    for (let id in cart) {
-        let item = cart[id];
-        let linePrice = item.price * item.quantity;
-        let lineCals = item.calories * item.quantity;
-        totalPrice += linePrice; totalCals += lineCals;
-        totalCarbs += (item.carbs || 0) * item.quantity;
-        totalProtein += (item.protein || 0) * item.quantity;
-        totalFat += (item.fat || 0) * item.quantity;
-
-        orderDetails.push({ id: item.id, name: item.name, quantity: item.quantity, price: linePrice, calories: lineCals });
-        receiptHtml += `<p>${item.name} x${item.quantity} <span style="float:right;">¥${linePrice} (🔥 ${lineCals} kcal)</span></p>`;
-    }
-
-    let now = new Date();
-    let timeString = now.toLocaleString();
-    let uniqueOrderId = 'ORD' + Date.now();
-
-    receiptHtml += `<hr>
-        <h3 style="text-align:right;">💰 总计支付: ¥${totalPrice}</h3>
-        <h4 style="text-align:right; color:#4CAF50;">🔥 摄入总热量: ${totalCals} kcal</h4>
-        <p style="text-align:right; font-size:12px; color:#666;">三大营养素: 碳水 ${totalCarbs}g | 蛋白 ${totalProtein}g | 脂肪 ${totalFat}g</p>
-        <p style="text-align:right; font-size:12px; color:#888;">下单时间: ${timeString}</p>
-        <p style="text-align:center; color:#ff9800; font-weight:bold; margin-top:20px;">请凭此页面前往食堂对应窗口取餐</p>`;
-
-    document.getElementById('receiptContent').innerHTML = receiptHtml;
-    showSection('receiptSection');
-
-    fetch(`${API_BASE_URL}/api/order`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_id: uniqueOrderId, student_id: currentUser.studentId, date: now.toLocaleDateString(), time: timeString, total_price: totalPrice, total_calories: totalCals, items: orderDetails })
-    });
-
-    cart = {}; updateCart();
-}
 
 // ================= 4. 个人中心与历史 =================
 function showProfile() {
@@ -518,9 +524,17 @@ function showProfile() {
     document.getElementById('pfWeight').value = currentUser.weight || '';
     document.getElementById('pfFatRate').value = currentUser.bodyFat || '';
 
+    document.getElementById('pfNickname').value = localStorage.getItem('userNickname') || '';
+    document.getElementById('pfRealName').value = localStorage.getItem('userName') || '';
+
     calculateHealthData();
-    showSection('profileSection');
+
+    // 🌟 在这里加上毛玻璃动画：幕后偷偷切换到 profileSection
+    showLoadingTransition("👤", "加载档案中", "正在从云端同步您的健康与体测数据...", 1200, () => {
+        showSection('profileSection');
+    });
 }
+
 function calculateHealthData() {
     let height = parseFloat(document.getElementById('pfHeight').value);
     let weight = parseFloat(document.getElementById('pfWeight').value);
@@ -551,8 +565,12 @@ async function saveProfile() {
     const height = document.getElementById('pfHeight').value;
     const weight = document.getElementById('pfWeight').value;
     const bodyFat = document.getElementById('pfFatRate').value;
+    const nickname = document.getElementById('pfNickname').value;
+    const realName = document.getElementById('pfRealName').value;
 
     // 🌟 存入本地记忆，这样不管怎么刷新页面，你的身体数据都在
+    localStorage.setItem('userNickname', nickname);
+    localStorage.setItem('userName', realName);
     localStorage.setItem('userGender', gender);
     localStorage.setItem('userAge', age);
     localStorage.setItem('userHeight', height);
@@ -560,7 +578,11 @@ async function saveProfile() {
     localStorage.setItem('userBodyFat', bodyFat);
 
     // 同步更新当前用户的变量
+
+
     if (currentUser) {
+        currentUser.name = realName;
+        currentUser.nickname = nickname;
         currentUser.gender = gender;
         currentUser.age = age;
         currentUser.height = height;
@@ -624,12 +646,15 @@ async function showHistory() {
             } else {
                 let html = '';
                 data.orders.forEach((order, index) => {
-                    let itemsHtml = order.items.map(i => `<li>${i.name} x${i.quantity} (¥${i.price}, 🔥${i.calories}kcal)</li>`).join('');
+                    // 🌟 核心修复：直接使用后端传过来的 items_desc 字符串，按照逗号拆分成列表！
+                    let itemsArray = order.items_desc ? order.items_desc.split(', ') : ['未知菜品'];
+                    let itemsHtml = itemsArray.map(item => `<li>${item}</li>`).join('');
+
                     html += `
                         <div style="background:#f9f9f9; padding:15px; border-radius:8px; margin-bottom:15px; cursor:pointer;" onclick="toggleOrderDetails('order_${index}')">
                             <div style="display:flex; justify-content:space-between; font-weight:bold;">
                                 <span>📅 ${order.time}</span>
-                                <span style="color:#ff9800;">¥${order.total_price} (🔥${order.total_calories} kcal) ▼</span>
+                                <span style="color:#ff9800;">¥${order.total_price} ▼</span>
                             </div>
                             <ul id="order_${index}" style="display:none; margin-top:15px; padding-left:20px; color:#555; border-top:1px dashed #ccc; padding-top:10px;">
                                 ${itemsHtml}
@@ -639,7 +664,13 @@ async function showHistory() {
                 });
                 document.getElementById('historyList').innerHTML = html;
             }
-            showSection('historySection');
+            showLoadingTransition("📜", "翻阅账单中", "正在努力为您拉取历史订单记录...", 1200, () => {
+                showSection('historySection');
+            });
+        })
+        .catch(err => {
+            console.error("历史订单获取失败:", err);
+            customAlert("❌ 网络错误", "无法连接到服务器，请重试。");
         });
 }
 
@@ -781,4 +812,180 @@ function showCustomAlert(message, callback) {
             if (callback) callback();
         }, 300);
     };
+}
+
+// ==========================================================
+// 🌟 核心修复：补全缺失的 checkout 结账函数
+// ==========================================================
+function checkout() {
+    // 1. 检查是否为空
+    if (Object.keys(cart).length === 0) {
+        return customAlert("提示", "你的餐盘空空如也，先去加点菜吧！");
+    }
+
+    // 2. 检查是否登录
+    if (!currentUser) {
+        pendingAction = 'checkout'; // 记住我要结账，登完录直接跳回来
+        return customAlert("🔒 需要登录", "请先登录才能下单结账哦！").then(() => {
+            showSection('loginSection');
+        });
+    }
+
+    // 3. 计算总价并打包菜品清单
+    let totalPrice = 0;
+    let totalCals = 0;
+    let orderDetails = [];
+
+    for (let id in cart) {
+        let item = cart[id];
+        totalPrice += item.price * item.quantity;
+        totalCals += item.calories * item.quantity;
+        orderDetails.push({
+            id: item.id,
+            name: item.name,
+            quantity: item.quantity,
+            price: item.price * item.quantity,
+            calories: item.calories * item.quantity
+        });
+    }
+
+    let now = new Date();
+    let timeString = now.toLocaleString();
+
+    // 4. 发送给后端的 /api/checkout 接口
+    fetch(`${API_BASE_URL}/api/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            student_id: currentUser.studentId,
+            total_price: totalPrice,
+            total_calories: totalCals,
+            items: orderDetails,
+            date: timeString
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === 'success') {
+            // 后端扣款成功，更新本地余额
+            currentUser.balance = data.balance;
+            localStorage.setItem('userBalance', data.balance);
+
+            // 弹出小票
+            generateReceipt(totalPrice, totalCals, orderDetails, timeString);
+        } else {
+            customAlert("❌ 下单失败", data.message);
+        }
+    })
+    .catch(err => {
+        console.error(err);
+        customAlert("❌ 网络错误", "无法连接到服务器，请检查后端运行状态。");
+    });
+}
+
+// 5. 覆盖重写原本的生成小票函数，让它变得更纯粹，只负责显示
+function generateReceipt(totalPrice, totalCals, orderDetails, timeString) {
+    let receiptHtml = `<p><strong>🧑‍🎓 顾客信息：</strong>${currentUser.name} (${currentUser.studentId})</p><hr>`;
+
+    orderDetails.forEach(item => {
+        receiptHtml += `<p>${item.name} x${item.quantity} <span style="float:right;">¥${item.price.toFixed(1)} (🔥 ${item.calories} kcal)</span></p>`;
+    });
+
+    receiptHtml += `<hr>
+        <h3 style="text-align:right;">💰 总计支付: ¥${totalPrice.toFixed(1)}</h3>
+        <h4 style="text-align:right; color:#4CAF50;">🔥 摄入总热量: ${totalCals} kcal</h4>
+        <p style="text-align:right; font-size:12px; color:#888;">下单时间: ${timeString}</p>
+        <p style="text-align:center; color:#ff9800; font-weight:bold; margin-top:20px;">请凭此页面前往食堂对应窗口取餐</p>`;
+
+    document.getElementById('receiptContent').innerHTML = receiptHtml;
+
+    // 🌟 新增：生成小票的加载动画
+    showLoadingTransition("🧾", "出票中", "付款成功！正在为您打印云端小票...", 1500, () => {
+        showSection('receiptSection');
+        cart = {};
+        updateCart();
+    });
+}
+
+// ==========================================================
+// 🌟 高级毛玻璃加载过渡动画 (通用版)
+// ==========================================================
+// ==========================================================
+// 🌟 高级毛玻璃加载过渡动画 (通用版)
+// ==========================================================
+function showLoadingTransition(emoji, title, message, duration, callback) {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+        position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+        background: rgba(255, 255, 255, 0.3);
+        backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+        display: flex; justify-content: center; align-items: center;
+        z-index: 99999; opacity: 0; transition: opacity 0.4s ease;
+    `;
+
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+        background: rgba(255, 255, 255, 0.9);
+        padding: 40px 50px; border-radius: 24px;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.08); border: 1px solid rgba(255,255,255,0.8);
+        text-align: center; max-width: 350px;
+        transform: scale(0.8) translateY(20px);
+        transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    `;
+
+    modal.innerHTML = `
+        <div style="font-size: 50px; margin-bottom: 15px; animation: float 2s ease-in-out infinite;">${emoji}</div>
+        <h3 style="margin: 0 0 10px 0; color: #2e7d32; font-size: 22px; font-weight: bold;">${title}</h3>
+        <p style="margin: 0 0 25px 0; color: #666; font-size: 15px; line-height: 1.6;">${message}</p>
+        <div style="display: flex; justify-content: center; gap: 8px;">
+            <div class="dot" style="width:10px; height:10px; background:#4CAF50; border-radius:50%; animation: bounce 1.4s infinite ease-in-out both;"></div>
+            <div class="dot" style="width:10px; height:10px; background:#4CAF50; border-radius:50%; animation: bounce 1.4s infinite ease-in-out both; animation-delay: -0.32s;"></div>
+            <div class="dot" style="width:10px; height:10px; background:#4CAF50; border-radius:50%; animation: bounce 1.4s infinite ease-in-out both; animation-delay: -0.16s;"></div>
+        </div>
+    `;
+
+    if (!document.getElementById('transition-styles')) {
+        const style = document.createElement('style');
+        style.id = 'transition-styles';
+        style.innerHTML = `
+            @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+            @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+        `;
+        document.head.appendChild(style);
+    }
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    setTimeout(() => {
+        overlay.style.opacity = '1';
+        modal.style.transform = 'scale(1) translateY(0)';
+    }, 10);
+
+    // 1. 遮罩入场
+    setTimeout(() => {
+        overlay.style.opacity = '1';
+        modal.style.transform = 'scale(1) translateY(0)';
+    }, 10);
+
+    // 2. 🌟 核心魔术：在遮罩完全变浓的时候（400ms），立刻在幕后执行换页/DOM切换！
+    setTimeout(() => {
+        if (callback) callback();
+    }, 400);
+
+    // 3. 遮罩退场（对于跳转去新页面的操作，这步甚至不会被用户看到，完美衔接）
+    setTimeout(() => {
+        overlay.style.opacity = '0';
+        modal.style.transform = 'scale(0.9) translateY(-20px)';
+        setTimeout(() => {
+            overlay.remove();
+        }, 400);
+    }, duration);
+}
+
+// 跳转到 AI 的专属函数
+function goToAIChat() {
+    showLoadingTransition("🪄", "连接 AI 大脑", "正在启动云端推理模型，即将进入沉浸式空间...", 1800, () => {
+        window.location.href = 'ai_chat.html';
+    });
 }

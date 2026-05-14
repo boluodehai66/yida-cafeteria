@@ -1,16 +1,43 @@
 import os
-import torch
-import json
-import re
 import traceback
+import requests
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
-from transformers import AutoTokenizer, AutoModelForCausalLM
 from openai import OpenAI
+
+# =================================================================
+# 🌟 1. 配置所有 API 客户端
+# =================================================================
+# 1. DeepSeek (用于配餐规划)
+DEEPSEEK_API_KEY = "sk-8ee72b53c5034c2ab7d0bea74072c597"
+deepseek_client = OpenAI(
+    api_key=DEEPSEEK_API_KEY,
+    base_url="https://api.deepseek.com"
+)
+
+# 2. 智谱 AI (用于单张图生成补漏)
+ZHIPU_API_KEY = "579e9802d2304881a96ed288488c809b.uq6edTegmxXzpVtm"
+image_client = OpenAI(
+    api_key=ZHIPU_API_KEY,
+    base_url="https://open.bigmodel.cn/api/paas/v4/"
+)
+
+# 3. 硅基流动 (用于分析菜品分类)
+api_client = OpenAI(
+    api_key="sk-cfxtslelijzmkfsdvnoqggdhmexmczpltavhbszqhmbivffr",
+    base_url="https://api.siliconflow.cn/v1"
+)
+
+
+def init_ai_model():
+    print("🚀 已成功接入云端满血大脑！显存已彻底解放！")
+
 
 app = Flask(__name__)
 CORS(app)
+
+user_memory = {"campus": None, "floor": None}
 
 # ================= 1. 数据库配置 =================
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -19,84 +46,47 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
 
+# =====================================================================
+# 🌟 2. 数据库模型 (修复了字段丢失，新增历史订单表)
+# =====================================================================
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    student_id = db.Column(db.String(20), unique=True, nullable=False)
-    name = db.Column(db.String(50), nullable=False)
-    password = db.Column(db.String(100), nullable=False)
-    balance = db.Column(db.Float, default=100.0)
+    student_id = db.Column(db.String(50), unique=True, nullable=False)  # 补全学号
+    name = db.Column(db.String(80), nullable=False)  # 修正为 name
+    password = db.Column(db.String(120), nullable=False)
+    balance = db.Column(db.Float, default=100.0)  # 补全余额
+    bmr = db.Column(db.Integer, default=1800)
+    goal = db.Column(db.String(100), default="保持健康")
 
 
 class MenuItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    week = db.Column(db.Integer)
-    day = db.Column(db.String(10))
-    name = db.Column(db.String(100))
-    category = db.Column(db.String(50))
-    price = db.Column(db.Float)
+    name = db.Column(db.String(100), nullable=False)
+    price = db.Column(db.Float, nullable=False)
     calories = db.Column(db.Integer)
-    carbs = db.Column(db.Float, default=0.0)
-    protein = db.Column(db.Float, default=0.0)
-    fat = db.Column(db.Float, default=0.0)
-    image = db.Column(db.String(255))
+    carbs = db.Column(db.Float)
+    protein = db.Column(db.Float)
+    fat = db.Column(db.Float)
+    category = db.Column(db.String(50))
+    image = db.Column(db.String(200))
+    day = db.Column(db.String(20), nullable=False)
+    campus = db.Column(db.String(50))
+    floor = db.Column(db.String(50))
 
 
-class Order(db.Model):
+# 🌟 新增：历史订单表
+class OrderHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
-    items = db.Column(db.Text)
-    total_price = db.Column(db.Float)
+    student_id = db.Column(db.String(50), nullable=False)
+    combo_name = db.Column(db.String(100))
+    items_desc = db.Column(db.Text, nullable=False)  # 保存菜品字符串
+    total_price = db.Column(db.Float, nullable=False)
+    date = db.Column(db.String(50), nullable=False)
 
 
-# 🌟 全局强制建表
-with app.app_context():
-    db.create_all()
-
-# ================= 2. 初始化 AI =================
-# 云端 API (用于菜品分类和 FLUX 画图)
-api_client = OpenAI(
-    api_key="sk-cfxtslelijzmkfsdvnoqggdhmexmczpltavhbszqhmbivffr",
-    base_url="https://api.siliconflow.cn/v1"
-)
-
-print("🔄 正在加载本地核心 AI 模型与 LoRA 微调...")
-base_model_path = r"D:\pycharm\pycharm project\yida_web\canteen_ai\model\Qwen1.5-4B-Chat"
-lora_path = r"D:\pycharm\pycharm project\yida_web\canteen_ai\model\canteen_lora"
-
-try:
-    from transformers import BitsAndBytesConfig
-
-    # 🌟 开启 4-bit 量化引擎提速
-    quantization_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_compute_dtype=torch.float16,
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_quant_type="nf4"
-    )
-    tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        base_model_path, device_map="auto", quantization_config=quantization_config, torch_dtype=torch.float16,
-        trust_remote_code=True
-    )
-    try:
-        from peft import PeftModel
-
-        if os.path.exists(lora_path):
-            model = PeftModel.from_pretrained(model, lora_path)
-            print("✅ 成功融合同学训练的 LoRA 专属食堂权重！")
-    except Exception as le:
-        print(f"⚠️ LoRA 挂载异常，降级为基础模型: {le}")
-
-    model.eval()
-    print("✅ AI 大脑已就位，随时准备配餐！")
-except Exception as e:
-    print(f"❌ 模型加载失败: {e}")
-    model = None
-    tokenizer = None
-
-
-# ================= 3. API 路由 =================
-
+# =====================================================================
+# 🌟 3. 基础功能接口
+# =====================================================================
 @app.route('/api/login', methods=['POST'])
 def login():
     try:
@@ -110,7 +100,6 @@ def login():
 
         user = User.query.filter_by(student_id=student_id).first()
         if not user:
-            # 自动注册
             new_user = User(student_id=student_id, name=name, password=password)
             db.session.add(new_user)
             db.session.commit()
@@ -126,40 +115,25 @@ def login():
         return jsonify({'status': 'error', 'message': f'后端报错: {str(e)}'}), 200
 
 
-# 🌟 新增：更新用户档案接口
 @app.route('/api/update_profile', methods=['POST'])
 def update_profile():
     try:
         data = request.json
         student_id = data.get('studentId')
-
-        # 验证有没有学号
         if not student_id:
             return jsonify({'status': 'error', 'message': '未提供学号，无法更新'}), 200
 
-        # 去数据库里找这个学生
         user = User.query.filter_by(student_id=student_id).first()
         if not user:
             return jsonify({'status': 'error', 'message': '在数据库中找不到该用户'}), 200
 
-        # 根据前端传来的数据，更新对应的字段（比如姓名、密码等）
-        if 'name' in data and data['name']:
-            user.name = data['name']
-        if 'password' in data and data['password']:
-            user.password = data['password']
+        if 'name' in data and data['name']: user.name = data['name']
+        if 'password' in data and data['password']: user.password = data['password']
 
-        # 保存到数据库
         db.session.commit()
-        print(f"✅ 学号 {student_id} 的档案更新成功！")
-
-        return jsonify({
-            'status': 'success',
-            'message': '档案保存成功！',
-            'user': {'id': user.id, 'name': user.name, 'balance': user.balance}
-        })
-
+        return jsonify({'status': 'success', 'message': '档案保存成功！',
+                        'user': {'id': user.id, 'name': user.name, 'balance': user.balance}})
     except Exception as e:
-        print(f"🔥 更新档案报错:\n{traceback.format_exc()}")
         return jsonify({'status': 'error', 'message': f'后端报错: {str(e)}'}), 200
 
 
@@ -184,123 +158,238 @@ def analyze_dish():
 @app.route('/api/menu', methods=['GET'])
 def get_menu():
     day = request.args.get('day', '周一')
-    items = MenuItem.query.filter_by(day=day).all()
-    return jsonify([{'id': i.id, 'name': i.name, 'price': i.price, 'calories': i.calories, 'category': i.category,
-                     'carbs': i.carbs, 'protein': i.protein, 'fat': i.fat, 'image': i.image} for i in items])
+    campus = request.args.get('campus', '北区')
+    floor = request.args.get('floor', '一楼')
+    items = MenuItem.query.filter_by(day=day, campus=campus, floor=floor).all()
+    menu_data = [
+        {"id": i.id, "name": i.name, "price": i.price, "calories": i.calories, "carbs": i.carbs, "protein": i.protein,
+         "fat": i.fat, "category": i.category, "image": i.image} for i in items]
+    return jsonify(menu_data)
 
 
-# 🌟 新增：调用 FLUX.1-schnell 免费大模型画图并存入数据库
+# 🌟 修复：改用智谱 CogView，彻底解决 403 问题
 @app.route('/api/generate_image', methods=['POST'])
 def generate_image():
     try:
         dish_name = request.json.get('name')
-        if not dish_name:
-            return jsonify({"status": "error", "message": "没有提供菜名"}), 400
+        if not dish_name: return jsonify({"status": "error", "message": "没有提供菜名"}), 400
 
-        print(f"🎨 正在召唤 FLUX 为【{dish_name}】作画...")
-        prompt = f"Professional food photography of a delicious Chinese dish named {dish_name}, steaming hot, highly detailed, appetizing, restaurant quality, cinematic lighting, 8k resolution, macro shot."
+        image_dir = os.path.join(basedir, 'static', 'images')
+        os.makedirs(image_dir, exist_ok=True)
+        local_filename = f"{dish_name}.jpg"
+        local_filepath = os.path.join(image_dir, local_filename)
+        db_image_path = f"/static/images/{local_filename}"
 
-        response = api_client.images.generate(
-            model="black-forest-labs/FLUX.1-schnell",
-            prompt=prompt,
-            size="1024x1024",
-            response_format="url"
-        )
-        image_url = response.data[0].url
+        if os.path.exists(local_filepath):
+            return jsonify({"status": "success", "image_url": db_image_path, "message": "图片本地已存在，无需重新生成"})
+
+        print(f"🎨 正在召唤 智谱CogView 为【{dish_name}】作画...")
+        prompt = f"一张专业的美食摄影照片，中国菜【{dish_name}】，刚出锅冒着热气，色泽诱人，餐厅级打光，高清微距特写。"
+
+        response = image_client.images.generate(model="cogview-3-plus", prompt=prompt, size="1024x1024")
+
+        img_data = requests.get(response.data[0].url).content
+        with open(local_filepath, 'wb') as handler:
+            handler.write(img_data)
 
         item = MenuItem.query.filter_by(name=dish_name).first()
         if item:
-            item.image = image_url
+            item.image = db_image_path
             db.session.commit()
-            print(f"✅ 【{dish_name}】照片已入库！")
 
-        return jsonify({"status": "success", "image_url": image_url})
+        return jsonify({"status": "success", "image_url": db_image_path})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 200
 
 
-# 🌟 核心升级：复刻同学的 infer.py 逻辑 + 套餐分块提取算法
+# =====================================================================
+# 🌟 4. 新增：订单记录与查询接口
+# =====================================================================
+# =====================================================================
+# 🌟 新增：订单记录与历史查询接口
+# =====================================================================
+# 1. 定义历史订单数据库表
+
+
+
+# 2. 前端结账下单的接收接口
+@app.route('/api/checkout', methods=['POST'])
+def save_order():
+    try:
+        data = request.json
+        student_id = data.get('student_id')
+        items = data.get('items', [])
+        total_price = data.get('total_price', 0)
+        date = data.get('date', '未知日期')
+
+        if not student_id:
+            return jsonify({"status": "error", "message": "请先登录才能下单！"}), 200
+
+        user = User.query.filter_by(student_id=student_id).first()
+        if user:
+            # 扣除余额
+            if user.balance >= total_price:
+                user.balance -= total_price
+            else:
+                return jsonify({"status": "error", "message": "余额不足，请充值！"}), 200
+
+            # 把点选的菜品拼成一句话存起来
+            items_str = ", ".join([f"{item.get('name')} x{item.get('quantity')}" for item in items])
+
+            new_order = OrderHistory(student_id=student_id, combo_name="自选套餐", items_desc=items_str,
+                                     total_price=total_price, date=date)
+            db.session.add(new_order)
+            db.session.commit()
+
+            return jsonify({"status": "success", "message": "下单成功！", "balance": user.balance})
+        else:
+            return jsonify({"status": "error", "message": "找不到该学生信息！"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 200
+
+
+# 3. 前端查询历史订单的接口
+@app.route('/api/history', methods=['GET'])
+def get_history():
+    student_id = request.args.get('student_id')
+    if not student_id:
+        return jsonify({"status": "error", "message": "未提供学号"})
+
+    orders = OrderHistory.query.filter_by(student_id=student_id).order_by(OrderHistory.id.desc()).all()
+    result = []
+    for o in orders:
+        result.append({
+            "id": o.id,
+            "combo_name": o.combo_name,
+            "items_desc": o.items_desc,
+            "total_price": o.total_price,
+            "time": o.date  # 前端是用 time 接收的
+        })
+    return jsonify({"status": "success", "orders": result})
+
+# =====================================================================
+# 🌟 5. 核心配餐接口
+# =====================================================================
 @app.route('/api/ai_plan', methods=['POST'])
 def ai_plan():
+    combos = []
     try:
         data = request.json
         user_input = data.get('text', '')
         day = data.get('day', '周一')
 
-        menu_items = MenuItem.query.filter_by(day=day).all()
-        if not menu_items:
-            return jsonify({"status": "error", "message": "当天没有菜单数据"})
+        # 🌟 剥夺全局记忆：直接拿前端传过来的当前聊天位置
+        campus = data.get('campus')
+        floor = data.get('floor')
 
-        menu_desc = "\n".join([f"- {i.name} ￥{i.price} {i.calories}kcal" for i in menu_items])
-        system_prompt = f"你是食堂点餐助手。回答用户关于食堂的问题。\n\n当前可用菜单（{day}）：\n{menu_desc[:1500]}\n\n食堂信息：综合楼一楼，早餐7-9点，午餐11:30-13:30，晚餐17-19点"
-        full_prompt = f"<|im_start|>system\n{system_prompt}<|im_end|>\n<|im_start|>user\n{user_input}<|im_end|>\n<|im_start|>assistant\n"
+        # 如果前端没传位置（说明是新对话还没告诉AI），立刻反问！
+        # 🌟 核心：获取前端传来的昵称
+        nickname = data.get('nickname', '同学')
 
-        if model is None or tokenizer is None:
-            return jsonify({"status": "error", "message": "AI 模型未加载，请检查后端报错。"})
+        if not campus or not floor:
+            return jsonify({
+                "status": "success",
+                "combos": [],
+                "reason": f"你好{nickname}！在为你搭配专属营养套餐前，请问你今天想在哪个校区哪层楼就餐呢？（例如：我想去北区一楼）"
+            })
 
-        inputs = tokenizer([full_prompt], return_tensors="pt").to(model.device)
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=512,
-                temperature=0.5,
-                top_p=0.8,
-                do_sample=True,
-                pad_token_id=tokenizer.eos_token_id,
+        menu_items = MenuItem.query.filter_by(day=day, campus=campus, floor=floor).all()
+        if not menu_items: return jsonify({"status": "error", "message": f"{campus}{floor}今天没有菜单数据"})
+
+        formatted_menu = [f"- [{i.category}] {i.name} ￥{i.price} ({i.calories}kcal)" for i in menu_items]
+        menu_desc = "\n".join(formatted_menu)
+
+        system_prompt = f"你是一个校园AI营养师。当前位置：{campus}{floor}。"
+        instructions = f"""【紧急指令】你现在正在进行开卷考试。
+1. 你【必须且只能】从下方的《今日真实菜单》中选择菜品。
+2. 【绝对禁止】使用你记忆中的任何菜名，如果菜单里没有，绝对不能写！
+3. 【强制包含主食】除非用户明确说明“不要主食”，否则你的套餐里【必须至少包含一份 [主食]】！
+4. 【强制数量】为了凑够预算，你必须选择 2-4 道菜品组成套餐。
+5. 【格式红线】每一道菜的前面【必须严格保留】中括号的分类标签（如 [荤菜]、[主食]），一个字都不能漏！
+
+《今日真实菜单》：
+{menu_desc}
+
+输出格式（严格遵守）：
+### 方案：[起一个有吸引力的名字]
+- [分类] 菜名 ￥价格 (热量kcal)
+- [分类] 菜名 ￥价格 (热量kcal)
+"""
+        try:
+            response = deepseek_client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": system_prompt + "\n" + instructions},
+                    {"role": "user", "content": user_input}
+                ],
+                temperature=0.2,
+                stream=False
             )
+            assistant_response = response.choices[0].message.content.strip()
+        except Exception as api_err:
+            return jsonify({"status": "error", "message": f"DeepSeek 请求失败: {str(api_err)}", "combos": []})
 
-        response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        if "assistant\n" in response:
-            assistant_response = response.split("assistant\n")[-1].strip()
-        else:
-            assistant_response = response.strip()
-
-        print(f"\n🤖 AI 自由发挥的回复:\n{assistant_response}\n")
-
-        combos = []
-        current_combo_name = "🍽️ 推荐搭配"
+        current_combo_name = "🍽️ 智能推荐搭配"
         current_ids = []
-        split_keywords = ["早餐", "午餐", "晚餐", "夜宵", "套餐一", "套餐二", "套餐三", "方案一", "方案二", "方案三",
-                          "第一餐", "第二餐", "第三餐", "推荐搭配"]
+        headers = ["方案", "第一餐", "建议", "推荐"]
 
         for line in assistant_response.split('\n'):
             line = line.strip()
             if not line: continue
 
-            is_header = False
-            for kw in split_keywords:
-                if kw in line and len(line) < 25:
-                    if current_ids:
-                        combos.append({"name": current_combo_name, "ids": current_ids})
-                        current_ids = []
-                    current_combo_name = line.strip("*#【】:-： ")
-                    is_header = True
-                    break
+            if any(h in line and len(line) < 20 for h in headers):
+                if current_ids:
+                    selected = [item for item in menu_items if item.id in current_ids]
+                    combos.append({
+                        "name": current_combo_name, "ids": current_ids,
+                        "items": [{"name": i.name, "image": i.image, "price": i.price, "calories": i.calories,
+                                   "protein": i.protein, "carbs": i.carbs, "fat": i.fat, "category": i.category} for i
+                                  in selected],
+                        "real_price": round(sum(i.price for i in selected), 2),
+                        "real_calories": int(sum(i.calories for i in selected)),
+                        "real_protein": round(sum(i.protein for i in selected), 1),
+                        "real_carbs": round(sum(i.carbs for i in selected), 1),
+                        "real_fat": round(sum(i.fat for i in selected), 1)
+                    })
+                    current_ids = []
+                current_combo_name = line.strip("*#【】:-： ")
+                continue
 
-            if not is_header:
-                # 🌟 修复：超级无敌模糊匹配！无视所有空格！
+            if line.startswith('-'):
                 for item in menu_items:
-                    # 把数据库菜名和 AI 生成的文字，统统去掉两端甚至中间的空格再对比
-                    db_name_clean = item.name.strip()
-                    line_clean = line.replace(" ", "").replace("　", "")
-
-                    if (db_name_clean in line or db_name_clean.replace(" ",
-                                                                       "") in line_clean) and item.id not in current_ids:
+                    if item.name in line and item.id not in current_ids:
                         current_ids.append(item.id)
 
         if current_ids:
-            combos.append({"name": current_combo_name, "ids": current_ids})
+            selected = [item for item in menu_items if item.id in current_ids]
+            combos.append({
+                "name": current_combo_name, "ids": current_ids,
+                "items": [
+                    {"name": i.name, "image": i.image, "price": i.price, "calories": i.calories, "protein": i.protein,
+                     "carbs": i.carbs, "fat": i.fat, "category": i.category} for i in selected],
+                "real_price": round(sum(i.price for i in selected), 2),
+                "real_calories": int(sum(i.calories for i in selected)),
+                "real_protein": round(sum(i.protein for i in selected), 1),
+                "real_carbs": round(sum(i.carbs for i in selected), 1),
+                "real_fat": round(sum(i.fat for i in selected), 1)
+            })
 
-        return jsonify({
-            "status": "success",
-            "combos": combos,
-            "reason": assistant_response
-        })
+        final_text = assistant_response
+        if combos:
+            final_text += "\n\n---\n**✅ 方案营养数据汇总：**\n"
+            for cb in combos:
+                final_text += f"🔹 **{cb['name']}**\n💰 总价：￥{cb['real_price']} | 🔥 总热量：{cb['real_calories']} kcal\n📊 蛋白质：{cb['real_protein']}g | 碳水：{cb['real_carbs']}g | 脂肪：{cb['real_fat']}g\n\n"
+            final_text += "> 💡 *详细菜品图片及单项数据已同步至右侧预览区。*"
+
+        return jsonify({"status": "success", "combos": combos, "reason": final_text})
 
     except Exception as e:
-        print(f"🔥 崩溃:\n{traceback.format_exc()}")
-        return jsonify({"status": "error", "message": str(e)}), 200
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": f"计算出错: {str(e)}", "combos": []})
 
 
 if __name__ == '__main__':
+    # 建立上下文以确保表存在（自动创建新表结构）
+    with app.app_context():
+        db.create_all()
     app.run(host='0.0.0.0', port=5000, debug=False)

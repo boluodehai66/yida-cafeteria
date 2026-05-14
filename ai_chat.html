@@ -53,13 +53,13 @@
 
     <div class="chat-section">
         <div class="chat-header">
-            <button class="back-btn" onclick="window.location.href='index.html'">← 返回食堂</button>
+            <button class="back-btn" onclick="goBackHome()">← 返回食堂</button>
             <h2 style="margin:0; font-size: 18px;">🪄 智慧食堂 AI 营养师 (多模态升级版)</h2>
         </div>
 
         <div class="chat-history" id="chatHistory">
             <div class="message ai">
-                <div class="bubble">你好小钰！我是你的专属 AI 营养师。我已经同步了今日菜单，并开启了 FLUX 实时绘图引擎。<br><br>你可以直接告诉我你的需求，比如：<br>“<strong>帮我搭配一套 30 元左右的减脂三餐方案。</strong>”</div>
+                <div class="bubble" id="welcomeBubble">你好！我是你的专属 AI 营养师。已同步今日菜单，准备好为您服务了。<br><br>您可以直接告诉我您的需求，比如：<br>“<strong>帮我搭配一套 30 元左右的减脂三餐方案。</strong>”</div>
             </div>
         </div>
 
@@ -84,8 +84,13 @@
     </div>
 
     <script>
+
         const API_BASE_URL = 'http://localhost:5000';
         let currentMenuData = [];
+
+        // 🌟 新增：专属当前聊天的临时记忆，关掉网页即失忆
+        let chatCampus = null;
+        let chatFloor = null;
 
         // 初始化：获取当日菜单数据
         async function fetchMenuData() {
@@ -100,7 +105,15 @@
             }
         }
 
-        window.onload = fetchMenuData;
+        window.onload = async () => {
+            await fetchMenuData();
+            // 🌟 页面加载后，自动把欢迎气泡里的称呼替换为用户的昵称
+            const nick = localStorage.getItem('userNickname') || '同学';
+            const welcomeBubble = document.querySelector('.ai .bubble');
+            if (welcomeBubble) {
+                welcomeBubble.innerHTML = welcomeBubble.innerHTML.replace('小钰', nick);
+            }
+        };
 
         function handleEnter(e) {
             if (e.key === 'Enter') sendMessage();
@@ -130,13 +143,29 @@
             const days = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
             const today = days[new Date().getDay()];
 
+            // 🌟 核心：从用户这句聊天中提取位置，存入“临时记忆”(网页关掉就忘)
+            if (text.includes("北区")) chatCampus = "北区";
+            else if (text.includes("南区")) chatCampus = "南区";
+            else if (text.includes("西区")) chatCampus = "西区";
+
+            if (text.includes("一楼")) chatFloor = "一楼";
+            else if (text.includes("二楼")) chatFloor = "二楼";
+
             try {
                 if (currentMenuData.length === 0) await fetchMenuData();
 
                 const res = await fetch(`${API_BASE_URL}/api/ai_plan`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: text, day: today })
+                    // 🌟 关键：把位置信息一起打包发给后端
+                    // 🌟 增加 nickname 参数，打包发给后端
+                    body: JSON.stringify({
+                        text: text,
+                        day: today,
+                        campus: chatCampus,
+                        floor: chatFloor,
+                        nickname: localStorage.getItem('userNickname') || '同学'
+                    })
                 });
                 const data = await res.json();
 
@@ -156,6 +185,7 @@
         }
 
         // 🌟 核心渲染：支持套餐分组与异步画图
+        // 🌟 核心渲染：支持套餐分组与本地图片智能兜底
         function renderComboCards(combos) {
             const panel = document.getElementById('recommendationPanel');
             const actionBtn = document.getElementById('addToCartBtn');
@@ -171,43 +201,37 @@
             let globalTotalCal = 0;
             let hasValidDish = false;
 
-            // 纯代码生成的 Base64 SVG 占位图，防屏蔽加载快
-            const loadingSvg = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="%23e8f5e9"/><text x="50" y="50" font-family="Arial" font-size="12" fill="%234caf50" text-anchor="middle" dominant-baseline="middle">作画中...</text></svg>`;
-
             combos.forEach(combo => {
                 let subTotal = 0;
                 let subCal = 0;
                 let cardsHtml = '';
 
-                combo.ids.forEach(id => {
-                    const item = currentMenuData.find(i => Number(i.id) === Number(id));
-                    if (item) {
+                if (combo.items && combo.items.length > 0) {
+                    combo.items.forEach(item => {
                         hasValidDish = true;
-                        subTotal += item.price;
-                        subCal += item.calories;
-                        globalTotalPrice += item.price;
-                        globalTotalCal += item.calories;
+                        subTotal += item.price || 0;
+                        subCal += item.calories || 0;
+                        globalTotalPrice += item.price || 0;
+                        globalTotalCal += item.calories || 0;
 
-                        let isRealImage = item.image && item.image.startsWith('http') && !item.image.includes('placeholder');
-                        let imgSrc = isRealImage ? item.image : loadingSvg;
+                        // 🌟 完美修复：将中文进行安全编码，并使用无引号冲突的 URL 作为兜底
+                        let safeName = encodeURIComponent(item.name);
+                        let imgSrc = `${API_BASE_URL}/static/images/${safeName}.jpg`;
+                        let fallbackUrl = `https://ui-avatars.com/api/?name=${safeName}&background=random&color=fff&size=200&font-size=0.3`;
 
+                        // ⚠️ 这里补全了之前漏掉的反引号和价格热量等 HTML 结构！
                         cardsHtml += `
                             <div class="card" style="box-shadow: none; border: 1px solid #f0f0f0;">
-                                <img id="img-${item.id}" src="${imgSrc}" alt="${item.name}" title="${item.name}">
+                                <img id="img-${item.id || item.name}" src="${imgSrc}" onerror="this.onerror=null; this.src='${fallbackUrl}';" alt="${item.name}" title="${item.name}">
                                 <div class="card-info">
-                                    <span class="price">¥${item.price.toFixed(1)}</span>
+                                    <span class="price">¥${item.price ? item.price.toFixed(1) : "0.0"}</span>
                                     <h4>${item.name}</h4>
-                                    <span class="tag">${item.category}</span>
-                                    <div class="nutrients">🔥 热量: ${item.calories} kcal<br>🥩 蛋白: ${item.protein}g | 🍞 碳水: ${item.carbs}g</div>
+                                    <div class="nutrients">🔥 热量: ${item.calories || 0} kcal</div>
                                 </div>
                             </div>
                         `;
-
-                        if (!isRealImage) {
-                            generateImageForDish(item.id, item.name);
-                        }
-                    }
-                });
+                    });
+                }
 
                 if (cardsHtml !== '') {
                     panel.innerHTML += `
@@ -261,9 +285,114 @@
             }
         }
 
+        // ================= 🌟 高级毛玻璃采纳通知 =================
         function acceptPlan() {
-            alert("✅ 方案已采纳！准备返回首页。");
-            window.location.href = 'index.html';
+            // 1. 创建全屏毛玻璃遮罩层
+            const overlay = document.createElement('div');
+            overlay.style.cssText = `
+                position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+                background: rgba(255, 255, 255, 0.3); /* 极浅的背景 */
+                backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); /* 核心毛玻璃特效 */
+                display: flex; justify-content: center; align-items: center;
+                z-index: 99999; opacity: 0; transition: opacity 0.4s ease;
+            `;
+
+            // 2. 创建居中的通知卡片
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                background: rgba(255, 255, 255, 0.9);
+                padding: 40px 50px; border-radius: 24px;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.08); border: 1px solid rgba(255,255,255,0.8);
+                text-align: center; max-width: 350px;
+                transform: scale(0.8) translateY(20px); /* 初始缩小并稍微靠下 */
+                transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); /* 弹簧动画效果 */
+            `;
+
+            modal.innerHTML = `
+                <div style="font-size: 50px; margin-bottom: 15px; animation: float 2s ease-in-out infinite;">🎉</div>
+                <h3 style="margin: 0 0 10px 0; color: #2e7d32; font-size: 22px; font-weight: bold;">方案已采纳！</h3>
+                <p style="margin: 0 0 25px 0; color: #666; font-size: 15px; line-height: 1.6;">AI 营养师已将您的专属菜单同步至餐盘，正在为您跳转...</p>
+
+                <div style="display: flex; justify-content: center; gap: 8px;">
+                    <div class="dot" style="width:10px; height:10px; background:#4CAF50; border-radius:50%; animation: bounce 1.4s infinite ease-in-out both;"></div>
+                    <div class="dot" style="width:10px; height:10px; background:#4CAF50; border-radius:50%; animation: bounce 1.4s infinite ease-in-out both; animation-delay: -0.32s;"></div>
+                    <div class="dot" style="width:10px; height:10px; background:#4CAF50; border-radius:50%; animation: bounce 1.4s infinite ease-in-out both; animation-delay: -0.16s;"></div>
+                </div>
+            `;
+
+            // 3. 动态注入关键帧动画 (用于图标悬浮和加载点点跳动)
+            const style = document.createElement('style');
+            style.innerHTML = `
+                @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+                @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+            `;
+            document.head.appendChild(style);
+
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+
+            // 4. 触发出现动画
+            // 4. 触发出现动画
+            setTimeout(() => {
+                overlay.style.opacity = '1';
+                modal.style.transform = 'scale(1) translateY(0)';
+            }, 10);
+
+            // 5. 🌟 核心修改：在遮罩变浓后的 500ms（视觉最模糊时），立刻发起跳转
+            // 这样浏览器会在模糊的背景下加载 index.html，用户完全感觉不到页面的硬切换
+            setTimeout(() => {
+                console.log("🤫 正在模糊遮罩下偷偷跳转...");
+                window.location.href = 'index.html';
+            }, 500);
+
+            // 原来的 2500ms 延迟和 opacity: 0 逻辑全部删掉，因为跳转会自动销毁当前页
+        }
+
+        // ================= 🌟 从 AI 界面退回食堂的动画 =================
+        function goBackHome() {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = `
+                position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+                background: rgba(255, 255, 255, 0.3); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+                display: flex; justify-content: center; align-items: center; z-index: 99999; opacity: 0; transition: opacity 0.4s ease;
+            `;
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                background: rgba(255, 255, 255, 0.9); padding: 40px 50px; border-radius: 24px;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.08); border: 1px solid rgba(255,255,255,0.8);
+                text-align: center; max-width: 350px; transform: scale(0.8) translateY(20px);
+                transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            `;
+            modal.innerHTML = `
+                <div style="font-size: 50px; margin-bottom: 15px; animation: float 2s ease-in-out infinite;">🏠</div>
+                <h3 style="margin: 0 0 10px 0; color: #2e7d32; font-size: 22px; font-weight: bold;">返回食堂</h3>
+                <p style="margin: 0 0 25px 0; color: #666; font-size: 15px;">正在退出 AI 沉浸空间...</p>
+                <div style="display: flex; justify-content: center; gap: 8px;">
+                    <div class="dot" style="width:10px; height:10px; background:#4CAF50; border-radius:50%; animation: bounce 1.4s infinite ease-in-out both;"></div>
+                    <div class="dot" style="width:10px; height:10px; background:#4CAF50; border-radius:50%; animation: bounce 1.4s infinite ease-in-out both; animation-delay: -0.32s;"></div>
+                    <div class="dot" style="width:10px; height:10px; background:#4CAF50; border-radius:50%; animation: bounce 1.4s infinite ease-in-out both; animation-delay: -0.16s;"></div>
+                </div>
+            `;
+            if (!document.getElementById('transition-styles')) {
+                const style = document.createElement('style');
+                style.id = 'transition-styles';
+                style.innerHTML = `@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } } @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }`;
+                document.head.appendChild(style);
+            }
+            overlay.appendChild(modal); document.body.appendChild(overlay);
+            setTimeout(() => { overlay.style.opacity = '1'; modal.style.transform = 'scale(1) translateY(0)'; }, 10);
+
+            // 延迟 1 秒后返回首页
+            // 1. 遮罩入场
+            setTimeout(() => { overlay.style.opacity = '1'; modal.style.transform = 'scale(1) translateY(0)'; }, 10);
+
+            // 2. 🌟 核心魔术：在遮罩最浓时（400ms）立刻发起页面跳转！
+            // 浏览器会在带着毛玻璃的状态下加载 index.html，完美掩盖白屏
+            setTimeout(() => {
+                window.location.href = 'index.html';
+            }, 400);
+
+            // 注意：因为跨页面跳转会直接销毁当前页面，所以这里连“退场动画”都不需要写了！
         }
     </script>
 </body>
