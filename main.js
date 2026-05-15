@@ -34,6 +34,32 @@ window.onload = () => {
 
     renderNav();
     switchDay(currentDay);
+
+    // ==========================================
+    // 🌟 核心修复：首页“拆快递”逻辑
+    // 检查本地仓库里有没有 AI 刚刚留下的订单包裹
+    const aiOrderStr = localStorage.getItem('aiPendingOrder');
+    if (aiOrderStr) {
+        try {
+            const aiOrderItems = JSON.parse(aiOrderStr);
+            // 将 AI 推荐的菜品逐一加入购物车
+            aiOrderItems.forEach(item => {
+                if (!cart[item.id]) {
+                    cart[item.id] = { ...item, quantity: 1 };
+                } else {
+                    cart[item.id].quantity += 1;
+                }
+            });
+            // 💡 关键：拿到菜品后立即销毁包裹，防止用户刷新页面时菜品重复翻倍
+            localStorage.removeItem('aiPendingOrder');
+
+            // 立即刷新购物车 UI 界面
+            updateCart();
+        } catch (e) {
+            console.error("解析 AI 预选订单失败:", e);
+        }
+    }
+    // ==========================================
 };
 
 // ================= 1. 基础 UI 与模态框 =================
@@ -79,6 +105,7 @@ function showSection(sectionId) {
 function goHome() {
     showLoadingTransition("🏠", "返回大厅", "正在为您准备新鲜菜单...", 800, () => {
         showSection('menuSection');
+        switchDay(currentDay);
     });
 }
 
@@ -217,7 +244,7 @@ function renderMenu(menuData) {
             // 继续使用好看的动态生成图片，或者你可以改为 ${item.image} 使用数据库里的图片
             // 🌟 Pro级修复：强制URL中文编码 + 跨域端口直连 + 智能图片兜底机制
             let safeName = encodeURIComponent(item.name);
-            let finalImageUrl = `${API_BASE_URL}/static/images/${safeName}.jpg`;
+            let finalImageUrl = `${API_BASE_URL}/static/images/${item.name}.jpg`;
             let fallbackUrl = `https://ui-avatars.com/api/?name=${safeName}&background=random&color=fff&size=250&font-size=0.3&length=4`;
 
             contentHtml += `

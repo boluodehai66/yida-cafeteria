@@ -87,18 +87,26 @@
 
         const API_BASE_URL = 'http://localhost:5000';
         let currentMenuData = [];
+        let latestAIItems = [];
 
         // 🌟 新增：专属当前聊天的临时记忆，关掉网页即失忆
         let chatCampus = null;
         let chatFloor = null;
+        let lastFetchedCampus = null;
+        let lastFetchedFloor = null;
 
         // 初始化：获取当日菜单数据
         async function fetchMenuData() {
             const days = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
             const today = days[new Date().getDay()];
+            let url = `${API_BASE_URL}/api/menu?day=${today}`;
+            if (chatCampus) url += `&campus=${chatCampus}`;
+            if (chatFloor) url += `&floor=${chatFloor}`;
             try {
-                const res = await fetch(`${API_BASE_URL}/api/menu?day=${today}`);
+                const res = await fetch(url);
                 currentMenuData = await res.json();
+                lastFetchedCampus = chatCampus;
+                lastFetchedFloor = chatFloor;
                 console.log("✅ 菜单库同步成功:", currentMenuData);
             } catch(e) {
                 console.error("❌ 菜单库同步失败:", e);
@@ -152,7 +160,7 @@
             else if (text.includes("二楼")) chatFloor = "二楼";
 
             try {
-                if (currentMenuData.length === 0) await fetchMenuData();
+                if (currentMenuData.length === 0 || chatCampus !== lastFetchedCampus || chatFloor !== lastFetchedFloor) await fetchMenuData();
 
                 const res = await fetch(`${API_BASE_URL}/api/ai_plan`, {
                     method: 'POST',
@@ -191,6 +199,13 @@
             const actionBtn = document.getElementById('addToCartBtn');
             panel.innerHTML = '';
 
+            latestAIItems = [];
+            if (combos && combos.length > 0) {
+                combos.forEach(combo => {
+                    if(combo.items) latestAIItems.push(...combo.items);
+                });
+            }
+
             if (!combos || combos.length === 0) {
                 panel.innerHTML = '<p style="text-align:center; color:#999; margin-top:50px;">未提取到具体菜品，您可以换个说法让 AI 重新推荐。</p>';
                 actionBtn.style.display = 'none';
@@ -216,7 +231,7 @@
 
                         // 🌟 完美修复：将中文进行安全编码，并使用无引号冲突的 URL 作为兜底
                         let safeName = encodeURIComponent(item.name);
-                        let imgSrc = `${API_BASE_URL}/static/images/${safeName}.jpg`;
+                        let imgSrc = `${API_BASE_URL}/static/images/${item.name}.jpg`;
                         let fallbackUrl = `https://ui-avatars.com/api/?name=${safeName}&background=random&color=fff&size=200&font-size=0.3`;
 
                         // ⚠️ 这里补全了之前漏掉的反引号和价格热量等 HTML 结构！
@@ -287,8 +302,14 @@
 
         // ================= 🌟 高级毛玻璃采纳通知 =================
         function acceptPlan() {
+            // 🌟 新增核心：在页面跳转毁灭前，把包裹死死存进浏览器的本地仓库里！
+            if (latestAIItems.length > 0) {
+                localStorage.setItem('aiPendingOrder', JSON.stringify(latestAIItems));
+            }
+
             // 1. 创建全屏毛玻璃遮罩层
             const overlay = document.createElement('div');
+            // ... (下方原有代码保持不变)
             overlay.style.cssText = `
                 position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
                 background: rgba(255, 255, 255, 0.3); /* 极浅的背景 */

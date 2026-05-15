@@ -13,7 +13,7 @@ from openai import OpenAI
 DEEPSEEK_API_KEY = "sk-8ee72b53c5034c2ab7d0bea74072c597"
 deepseek_client = OpenAI(
     api_key=DEEPSEEK_API_KEY,
-    base_url="https://api.deepseek.com"
+    base_url="https://api.deepseek.com/v1"
 )
 
 # 2. 智谱 AI (用于单张图生成补漏)
@@ -342,7 +342,7 @@ def ai_plan():
                     selected = [item for item in menu_items if item.id in current_ids]
                     combos.append({
                         "name": current_combo_name, "ids": current_ids,
-                        "items": [{"name": i.name, "image": i.image, "price": i.price, "calories": i.calories,
+                        "items": [{"id": i.id, "name": i.name, "image": i.image, "price": i.price, "calories": i.calories,
                                    "protein": i.protein, "carbs": i.carbs, "fat": i.fat, "category": i.category} for i
                                   in selected],
                         "real_price": round(sum(i.price for i in selected), 2),
@@ -365,7 +365,7 @@ def ai_plan():
             combos.append({
                 "name": current_combo_name, "ids": current_ids,
                 "items": [
-                    {"name": i.name, "image": i.image, "price": i.price, "calories": i.calories, "protein": i.protein,
+                    {"id": i.id, "name": i.name, "image": i.image, "price": i.price, "calories": i.calories, "protein": i.protein,
                      "carbs": i.carbs, "fat": i.fat, "category": i.category} for i in selected],
                 "real_price": round(sum(i.price for i in selected), 2),
                 "real_calories": int(sum(i.calories for i in selected)),
